@@ -39,7 +39,7 @@ jobs:
           cp ./build_output/Jellyfin.Plugin.MusicTags.dll staging/
           cp images/logo.jpg staging/logo.jpg
           cd staging
-          zip -X ../Jellyfin.Plugin.MusicTags${{ github.ref_name }}.zip *
+          zip -X ../Jellyfin.Plugin.MusicTags_${{ github.ref_name }}.zip *
           cd ..
 
       - name: Get Release Notes
@@ -151,7 +151,7 @@ jobs:
         with:
           name: Release ${{ github.ref_name }}
           body: ${{ steps.get_release_notes.outputs.release_notes }}
-          files: ./Jellyfin.Plugin.MusicTags_${{ github.ref_name }}.zip
+          files: ./Jellyfin.Plugin.MusicTags${{ github.ref_name }}.zip
           draft: false
           prerelease: false
           generate_release_notes: false
@@ -164,7 +164,7 @@ jobs:
           # 1. Set up variables
           VERSION=$(echo "${{ github.ref_name }}" | sed 's/v//')
           ASSEMBLY_VERSION="${VERSION}"
-          ZIP_NAME="Jellyfin.Plugin.MusicTags${{ github.ref_name }}.zip"
+          ZIP_NAME="Jellyfin.Plugin.MusicTags_${{ github.ref_name }}.zip"
           CHECKSUM=$(md5sum ${ZIP_NAME} | cut -d' ' -f1 | tr '[:lower:]' '[:upper:]')
           DOWNLOAD_URL="https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/${ZIP_NAME}"
           TARGET_ABI="10.10.0"
