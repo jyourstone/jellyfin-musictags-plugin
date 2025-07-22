@@ -142,7 +142,7 @@ public class MusicTagService(
             {
                 await AddTagsToAudioItemAsync(audioItem, extractedTags, cancellationToken).ConfigureAwait(false);
                 
-                _logger.LogInformation("Extracted {Count} tags from {Name}: {Tags}",
+                _logger.LogDebug("Extracted {Count} tags from {Name}: {Tags}",
                     extractedTags.Count, audioItem.Name, string.Join(", ", extractedTags));
             }
         }

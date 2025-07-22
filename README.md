@@ -8,7 +8,7 @@
 
 A plugin for Jellyfin that extracts metadata tags from audio files (ID3v2, Vorbis comments, etc.) and adds them as Jellyfin tags for better organization and discovery.
 
-This plugin automatically processes your music library to extract embedded tags and makes them available for filtering, searching, and organizing your music collection.
+This plugin automatically processes your music library to extract embedded tags and makes them available for filtering, and organizing your music collection.
 
 Tested and works with Jellyfin version `10.10.0` and newer.
 
@@ -37,12 +37,12 @@ MusicTags features a modern web-based configuration interface through the plugin
 The configuration page allows you to:
 
 1. **Tag Names to Extract**: Specify which tags to extract from your audio files
-   - Comma-separated list of tag names (e.g., "BPM,AB:GENRE,AB:MOOD")
+   - Comma-separated list of tag names (e.g., "BPM,KEY")
    - Supports standard ID3 tags, custom frames, and Vorbis comments
    - Tags are added to Jellyfin in the format "TagName:Value" (e.g., "BPM:141")
 
 2. **Tag Names to Remove**: Remove unwanted tags from your Jellyfin library
-   - Comma-separated list of tag names to remove (e.g., "BPM,AB:GENRE")
+   - Comma-separated list of tag names to remove (e.g., "BPM,KEY")
    - Removes ALL instances of these tag names from your library
 
 3. **Processing Options**: Control how tags are processed
@@ -82,30 +82,24 @@ Download the latest release from the [Releases page](https://github.com/jyoursto
 
 ## Usage Examples
 
-### Example 1: Extract BPM and Mood Tags
-Configure the plugin to extract BPM and mood information:
-- **Tag Names to Extract**: `BPM,AB:MOOD`
-- This will add tags like "BPM:141" and "AB:MOOD:energetic" to your music
+### Example 1: Extract BPM and KEY Tags
+Configure the plugin to extract BPM and KEY information:
+- **Tag Names to Extract**: `BPM,KEY`
+- This will add tags like "BPM:141" and "KEY:D" to your music
 
-### Example 2: Extract Genre Information
-Extract genre tags from various sources:
-- **Tag Names to Extract**: `GENRE,AB:GENRE`
-- This will extract both standard ID3 genre tags and custom Vorbis genre tags
-
-### Example 3: Clean Up Old Tags
+### Example 2: Clean Up Old Tags
 Remove unwanted tags from your library:
-- **Tag Names to Remove**: `OLD_TAG,LEGACY_GENRE`
+- **Tag Names to Remove**: `BPM`
 - This will remove all instances of these tags from your Jellyfin music library
 
 ## 🎯 Perfect Companion: SmartPlaylist Plugin
 
-MusicTags works exceptionally well with the **[SmartPlaylist plugin](https://github.com/jyourstone/jellyfin-smartplaylist-plugin)**! Once you've extracted audio tags with MusicTags, you can use SmartPlaylist to create dynamic playlists based on those custom tags.
+MusicTags works exceptionally well with the **[SmartPlaylist Plugin](https://github.com/jyourstone/jellyfin-smartplaylist-plugin)**! Once you've extracted audio tags with MusicTags, you can use SmartPlaylist to create dynamic playlists based on those custom tags.
 
 ### SmartPlaylist Integration Examples
 
-- **High-Energy Workout Mix**: Create a playlist with `BPM` tags between 140-160
+- **High-Energy Workout Mix**: Create a playlist with `BPM` tags between 130-150 (filter by tags and use this regex: `\bBPM:(13[0-9]|14[0-9]|150)\b`)
 - **Chill Vibes**: Filter by `AB:MOOD` tags like "chill", "relaxing", or "ambient"
-- **Custom Genre Collections**: Build playlists based on your extracted `AB:GENRE` tags
 - **Key-Based Playlists**: Group songs by musical key using extracted `KEY` tags
 - **Complex Combinations**: Combine multiple audio tags (e.g., "BPM:140-160" AND "AB:MOOD:energetic")
 
@@ -113,22 +107,8 @@ This powerful combination allows you to leverage the rich metadata embedded in y
 
 ## Automatic Processing
 
-MusicTags automatically processes your audio files when:
-- The "Process Music Tags" scheduled task runs
-- New audio files are added to your library
-- Existing audio files are updated
-
+MusicTags automatically processes your audio files when the "Process Music Tags" scheduled task runs.
 You can also manually trigger processing from the plugin configuration page.
-
-## 🚀 Roadmap
-
-Here are some of the planned features for future updates. Feel free to contribute or suggest new ideas!
-
-- **Advanced Tag Mapping**: Map audio file tags to specific Jellyfin metadata fields
-- **Tag Value Normalization**: Standardize tag values (e.g., normalize BPM ranges)
-- **Batch Processing Options**: More granular control over processing behavior
-- **Tag Statistics**: View statistics about extracted tags in your library
-- **Export/Import**: Backup and restore tag extraction configurations
 
 ## Development
 
@@ -152,12 +132,8 @@ For local development, see the [dev folder](https://github.com/jyourstone/jellyf
 - Result: Adds "AB:MOOD:energetic" tags for mood classification
 
 #### **Key Information**
-- Extract: `TKEY` (ID3v2 key frame)
-- Result: Adds "TKEY:C" tags for musical key information
-
-#### **Multiple Sources**
-- Extract: `GENRE,AB:GENRE,MOOD,AB:MOOD`
-- Result: Extracts genre and mood from both ID3 and Vorbis sources
+- Extract: `KEY` (ID3v2 key frame)
+- Result: Adds "KEY:C" tags for musical key information
 
 ### File Format Support
 
@@ -172,14 +148,9 @@ The plugin supports tag extraction from:
 ### Performance Considerations
 
 - Tag extraction is performed as a background task to avoid impacting Jellyfin performance
-- Large libraries may take some time to process initially
-- Subsequent runs only process new or modified files
+- Large libraries may take some time to process
 - Processing can be scheduled during off-peak hours
-
-## Credits
-
-This project was created to enhance music organization in Jellyfin by leveraging the rich metadata often embedded in audio files.
 
 ## Disclaimer
 
-This plugin extracts metadata directly from audio files and adds it to Jellyfin's tag system. The quality and accuracy of extracted tags depend on the metadata embedded in your audio files. Some audio files may have incomplete, inconsistent, or missing metadata.
+The vast majority of this plugin, was developed by an AI assistant. While I do have some basic experience with C# from a long time ago, I'm essentially the project manager, guiding the AI, fixing its occasional goofs, and trying to keep it from becoming self-aware. Use at your own risk!
