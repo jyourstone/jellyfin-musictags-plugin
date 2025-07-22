@@ -86,14 +86,65 @@
                 pluginUniqueId: '25EE643C-8A32-41BE-B165-E9CA0B57E769'
             };
 
+            var statusCheckInterval = null;
+
+            function checkTaskStatus() {
+                ApiClient.ajax({
+                    type: 'GET',
+                    url: ApiClient.getUrl('MusicTags/Status')
+                }).then(function(response) {
+                    var processButton = document.querySelector('#processTagsButton');
+                    var removeButton = document.querySelector('#removeTagsButton');
+                    
+                    if (response.IsTaskRunning) {
+                        // Task is running, keep buttons disabled
+                        processButton.disabled = true;
+                        removeButton.disabled = true;
+                        processButton.querySelector('span').textContent = 'Processing... (Task Running)';
+                        removeButton.querySelector('span').textContent = 'Remove Tags Now (Task Running)';
+                        
+                        // Continue checking status
+                        if (!statusCheckInterval) {
+                            statusCheckInterval = setInterval(checkTaskStatus, 3000); // Check every 3 seconds
+                        }
+                    } else {
+                        // Task is not running, enable buttons
+                        processButton.disabled = false;
+                        removeButton.disabled = false;
+                        processButton.querySelector('span').textContent = 'Process All Music Tags Now';
+                        removeButton.querySelector('span').textContent = 'Remove Tags Now';
+                        
+                        // Stop checking status
+                        if (statusCheckInterval) {
+                            clearInterval(statusCheckInterval);
+                            statusCheckInterval = null;
+                        }
+                    }
+                }).catch(function(error) {
+                    console.error('Error checking task status:', error);
+                });
+            }
+
             document.querySelector('#MusicTagsConfigPage')
                 .addEventListener('pageshow', function() {
                     Dashboard.showLoadingMsg();
                     ApiClient.getPluginConfiguration(MusicTagsConfig.pluginUniqueId).then(function (config) {
                         document.querySelector('#TagNames').value = config.TagNames || '';
                         document.querySelector('#OverwriteExistingTags').checked = config.OverwriteExistingTags || false;
+                        
+                        // Check if the task is currently running
+                        checkTaskStatus();
                         Dashboard.hideLoadingMsg();
                     });
+                });
+
+            // Clean up interval when page is hidden
+            document.querySelector('#MusicTagsConfigPage')
+                .addEventListener('pagehide', function() {
+                    if (statusCheckInterval) {
+                        clearInterval(statusCheckInterval);
+                        statusCheckInterval = null;
+                    }
                 });
 
             document.querySelector('#MusicTagsConfigForm')
@@ -148,7 +199,23 @@
                         button.disabled = false;
                         span.textContent = originalText;
                         console.error('API Error:', error);
-                        Dashboard.alert('Error removing tags. Check server logs for details.');
+                        
+                        // Check if it's a 400 error (task already running)
+                        if (error.status === 400) {
+                            // Parse the error message from the response
+                            error.text().then(function(errorText) {
+                                try {
+                                    var errorData = JSON.parse(errorText);
+                                    Dashboard.alert(errorData.Message || 'Task is already running. Please wait for the current scan to complete.');
+                                } catch (parseError) {
+                                    Dashboard.alert('Task is already running. Please wait for the current scan to complete.');
+                                }
+                            }).catch(function() {
+                                Dashboard.alert('Task is already running. Please wait for the current scan to complete.');
+                            });
+                        } else {
+                            Dashboard.alert('Error removing tags. Check server logs for details.');
+                        }
                     });
                 });
 
@@ -173,11 +240,30 @@
                         button.disabled = false;
                         span.textContent = originalText;
                         Dashboard.alert('Tag processing started, this can take a while if you have a large music library.');
+                        
+                        // Start checking task status
+                        setTimeout(checkTaskStatus, 1000); // Check after 1 second
                     }).catch(function(error) {
                         button.disabled = false;
                         span.textContent = originalText;
                         console.error('API Error:', error);
-                        Dashboard.alert('Error processing tags. Check server logs for details.');
+                        
+                        // Check if it's a 400 error (task already running)
+                        if (error.status === 400) {
+                            // Parse the error message from the response
+                            error.text().then(function(errorText) {
+                                try {
+                                    var errorData = JSON.parse(errorText);
+                                    Dashboard.alert(errorData.Message || 'Task is already running. Please wait for the current scan to complete.');
+                                } catch (parseError) {
+                                    Dashboard.alert('Task is already running. Please wait for the current scan to complete.');
+                                }
+                            }).catch(function() {
+                                Dashboard.alert('Task is already running. Please wait for the current scan to complete.');
+                            });
+                        } else {
+                            Dashboard.alert('Error processing tags. Check server logs for details.');
+                        }
                     });
                 });
         </script>

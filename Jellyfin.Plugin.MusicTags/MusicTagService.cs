@@ -572,7 +572,7 @@ public class MusicTagService(
     {
         try
         {
-            _logger.LogInformation("Starting bulk tag removal for tags: {TagsToRemove}", tagsToRemove);
+            _logger.LogInformation("Starting bulk tag removal for tags: {TagsToRemove}. This can take a while if you have a large music library.", tagsToRemove);
 
             // Create query for all audio items
             var query = new InternalItemsQuery(null) // null user means system-wide query
@@ -627,7 +627,7 @@ public class MusicTagService(
     {
         try
         {
-            _logger.LogInformation("Starting bulk ID3 tag processing for all audio items");
+            _logger.LogInformation("Starting bulk ID3 tag processing for all audio items. This can take a while if you have a large music library.");
 
             // Create query for all audio items
             var query = new InternalItemsQuery(null) // null user means system-wide query

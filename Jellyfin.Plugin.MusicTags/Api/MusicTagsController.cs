@@ -70,17 +70,31 @@ public class MusicTagsController(
             var refreshTask = _taskManager.ScheduledTasks.FirstOrDefault(t => t.ScheduledTask.Key == "ProcessMusicTags");
             if (refreshTask != null)
             {
+                // Check if the task is already running
+                if (refreshTask.State == TaskState.Running)
+                {
+                    _logger.LogWarning("MusicTags processing task is already running");
+                    var runningResult = new ProcessingResult
+                    {
+                        Success = false,
+                        Message = "Music tag processing is already running. Please wait for the current scan to complete before starting a new one.",
+                        Timestamp = DateTime.UtcNow
+                    };
+
+                    return BadRequest(runningResult);
+                }
+
                 _logger.LogInformation("Triggering MusicTags processing task");
                 _taskManager.Execute(refreshTask, new TaskOptions());
                 
-                var result = new ProcessingResult
+                var successResult = new ProcessingResult
                 {
                     Success = true,
                     Message = "Music tag processing task has been triggered. Processing will begin shortly.",
                     Timestamp = DateTime.UtcNow
                 };
 
-                return Ok(result);
+                return Ok(successResult);
             }
             else
             {
