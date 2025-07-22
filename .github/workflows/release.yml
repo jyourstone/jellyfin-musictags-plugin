@@ -151,7 +151,7 @@ jobs:
         with:
           name: Release ${{ github.ref_name }}
           body: ${{ steps.get_release_notes.outputs.release_notes }}
-          files: ./Jellyfin.Plugin.MusicTags${{ github.ref_name }}.zip
+          files: ./Jellyfin.Plugin.MusicTags_${{ github.ref_name }}.zip
           draft: false
           prerelease: false
           generate_release_notes: false
