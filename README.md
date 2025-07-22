@@ -2,7 +2,7 @@
 
 <div align="center">
     <p>
-        <img alt="Logo" src="https://raw.githubusercontent.com/jyourstone/jellyfin-musictags-plugin/master/images/logo.png" height="350"/>
+        <img alt="Logo" src="https://raw.githubusercontent.com/jyourstone/jellyfin-musictags-plugin/master/images/logo.jpg" height="350"/>
     </p>
 </div>
 

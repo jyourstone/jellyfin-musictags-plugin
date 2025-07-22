@@ -22,7 +22,7 @@ dotnet build ../Jellyfin.Plugin.MusicTags/Jellyfin.Plugin.MusicTags.csproj --con
 cp meta-dev.json $OUTPUT_DIR/meta.json
 
 # Copy the logo image for local plugin display
-cp ../images/logo.png $OUTPUT_DIR/logo.png
+cp ../images/logo.jpg $OUTPUT_DIR/logo.jpg
 
 # Create the Configuration directory and copy the logging file for debug logs
 mkdir -p $OUTPUT_DIR/Configuration

@@ -24,7 +24,7 @@ dotnet build ..\Jellyfin.Plugin.MusicTags\Jellyfin.Plugin.MusicTags.csproj --con
 Copy-Item -Path "meta-dev.json" -Destination "$OUTPUT_DIR\meta.json"
 
 # Copy the logo image for local plugin display
-Copy-Item -Path "..\images\logo.png" -Destination "$OUTPUT_DIR\logo.png"
+Copy-Item -Path "..\images\logo.jpg" -Destination "$OUTPUT_DIR\logo.jpg"
 
 # Create the Configuration directory and copy the logging file for debug logs
 New-Item -ItemType Directory -Path "$OUTPUT_DIR\Configuration" -Force | Out-Null

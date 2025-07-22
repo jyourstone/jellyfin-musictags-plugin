@@ -37,7 +37,7 @@ jobs:
         run: |
           mkdir -p staging
           cp ./build_output/Jellyfin.Plugin.MusicTags.dll staging/
-          cp images/logo.png staging/logo.png
+          cp images/logo.jpg staging/logo.jpg
           cd staging
           zip -X ../Jellyfin.Plugin.MusicTags${{ github.ref_name }}.zip *
           cd ..
@@ -205,7 +205,7 @@ jobs:
               --arg description "Automatically extract metadata from audio files - such as ID3 tags, Vorbis comments, and more - and convert them into standard Jellyfin tags." \
               --arg category "General" \
               --arg owner "jyourstone" \
-              --arg imageUrl "https://raw.githubusercontent.com/jyourstone/jellyfin-musictags-plugin/master/images/logo.png" \
+              --arg imageUrl "https://raw.githubusercontent.com/jyourstone/jellyfin-musictags-plugin/master/images/logo.jpg" \
               '{name: $name, guid: $guid, overview: $overview, description: $description, category: $category, owner: $owner, imageUrl: $imageUrl, versions: []}')
             jq --argjson new_entry "$PLUGIN_ENTRY" '. += [$new_entry]' "$MANIFEST_FILE" > tmp_manifest.json && mv tmp_manifest.json "$MANIFEST_FILE"
           fi
