@@ -9,19 +9,19 @@ The local development environment is completely contained within the `/dev` dire
 
 - This includes the `docker-compose.yml`, the `build-local.sh` script, test media folders, and the `jellyfin-data` directory. The build script is configured to use a separate `meta-dev.json` file and handles all necessary paths for a local build. Do not modify files outside of `/dev` for local testing.
 
-### C# 12+ Collection Expressions
+C# 12+ Collection Expressions
 
 Use C# 12+ collection expressions for cleaner, more concise code.
 
-### Debugging and Testing Workflow
+Debugging and Testing Workflow
 
-#### Local Development Loop
+Local Development Loop
 1. Make code changes
 2. Build: `./build-local.sh` (from `/dev` directory)
 3. Wait for user input
 4. Check logs: `tail -n 100 jellyfin-data/config/log/log_YYYYMMDD.log`
 
-#### Log Analysis Patterns
+Log Analysis Patterns
 ```bash
 # Find specific debug messages
 grep -A 10 -B 5 "specific_debug_message" jellyfin-data/config/log/log_*.log

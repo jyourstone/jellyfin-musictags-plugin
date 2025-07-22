@@ -18,12 +18,10 @@ namespace Jellyfin.Plugin.MusicTags.ScheduleTasks;
 public class ProcessMusicTagsTask(
     ILogger<ProcessMusicTagsTask> logger,
     ILibraryManager libraryManager,
-    IApplicationPaths applicationPaths,
     ILoggerFactory loggerFactory) : IScheduledTask
 {
     private readonly ILogger<ProcessMusicTagsTask> _logger = logger;
     private readonly ILibraryManager _libraryManager = libraryManager;
-    private readonly IApplicationPaths _applicationPaths = applicationPaths;
     private readonly ILoggerFactory _loggerFactory = loggerFactory;
 
     /// <inheritdoc />
@@ -48,7 +46,7 @@ public class ProcessMusicTagsTask(
             // Create the MusicTagService manually with the correct logger type
             var configuration = Plugin.Instance?.Configuration ?? new PluginConfiguration();
             var serviceLogger = _loggerFactory.CreateLogger<MusicTagService>();
-            var musicTagService = new MusicTagService(serviceLogger, _libraryManager, _applicationPaths, configuration);
+            var musicTagService = new MusicTagService(serviceLogger, _libraryManager, configuration);
 
             // Use the service to process all audio items
             await musicTagService.ProcessAllAudioItemsAsync(cancellationToken).ConfigureAwait(false);
