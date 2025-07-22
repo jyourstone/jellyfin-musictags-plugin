@@ -1,0 +1,61 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+### Development Environment
+
+The local development environment is completely contained within the `/dev` directory.
+
+- This includes the `docker-compose.yml`, the `build-local.sh` script, test media folders, and the `jellyfin-data` directory. The build script is configured to use a separate `meta-dev.json` file and handles all necessary paths for a local build. Do not modify files outside of `/dev` for local testing.
+
+### C# 12+ Collection Expressions
+
+Use C# 12+ collection expressions for cleaner, more concise code.
+
+### Debugging and Testing Workflow
+
+#### Local Development Loop
+1. Make code changes
+2. Build: `./build-local.sh` (from `/dev` directory)
+3. Wait for user input
+4. Check logs: `tail -n 100 jellyfin-data/config/log/log_YYYYMMDD.log`
+
+#### Log Analysis Patterns
+```bash
+# Find specific debug messages
+grep -A 10 -B 5 "specific_debug_message" jellyfin-data/config/log/log_*.log
+
+# Monitor real-time logs during testing
+tail -f jellyfin-data/config/log/log_*.log | grep "MusicTags"
+
+# Count log entries for performance analysis
+grep -c "expensive_operation" jellyfin-data/config/log/log_*.log
+```
+
+#### Debugging Unknown Data Structures
+Always add comprehensive logging when exploring new object types:
+```csharp
+if (result != null)
+{
+    logger?.LogDebug("Result type: {Type}", result.GetType().Name);
+    
+    // Log properties
+    var properties = result.GetType().GetProperties().Select(p => p.Name).ToArray();
+    logger?.LogDebug("Properties: [{Props}]", string.Join(", ", properties));
+    
+    // Test if it's enumerable
+    if (result is IEnumerable<object> enumerable)
+    {
+        var items = enumerable.Take(3).ToList();
+        logger?.LogDebug("Enumerable with {Count} items (showing first 3)", items.Count);
+        
+        foreach (var item in items)
+        {
+            var itemProps = item.GetType().GetProperties().Select(p => p.Name).ToArray();
+            logger?.LogDebug("Item properties: [{Props}]", string.Join(", ", itemProps));
+        }
+    }
+}
+```
+
