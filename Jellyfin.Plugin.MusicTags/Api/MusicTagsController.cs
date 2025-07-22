@@ -1,0 +1,228 @@
+using System;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using Jellyfin.Plugin.MusicTags.Configuration;
+using MediaBrowser.Common.Configuration;
+using MediaBrowser.Controller.Library;
+using MediaBrowser.Model.Entities;
+using MediaBrowser.Model.Tasks;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
+
+namespace Jellyfin.Plugin.MusicTags.Api;
+
+/// <summary>
+/// API controller for MusicTags plugin.
+/// </summary>
+[ApiController]
+[Route("MusicTags")]
+[Authorize]
+public class MusicTagsController(
+    ILogger<MusicTagsController> logger,
+    ILibraryManager libraryManager,
+    ITaskManager taskManager,
+    ILoggerFactory loggerFactory,
+    IApplicationPaths applicationPaths) : ControllerBase
+{
+    private readonly ILogger<MusicTagsController> _logger = logger;
+    private readonly ILibraryManager _libraryManager = libraryManager;
+    private readonly ITaskManager _taskManager = taskManager;
+    private readonly ILoggerFactory _loggerFactory = loggerFactory;
+    private readonly IApplicationPaths _applicationPaths = applicationPaths;
+
+    /// <summary>
+    /// Gets the plugin status and statistics.
+    /// </summary>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The plugin status.</returns>
+    [HttpGet("Status")]
+    public ActionResult<PluginStatus> GetStatus(CancellationToken cancellationToken)
+    {
+        try
+        {
+            var audioCount = 0; // TODO: Implement proper audio item counting
+
+            var configuration = Plugin.Instance?.Configuration ?? new PluginConfiguration();
+            var status = new PluginStatus
+            {
+                TotalAudioItems = audioCount,
+                TagNames = configuration.TagNames,
+                OverwriteExistingTags = configuration.OverwriteExistingTags
+            };
+
+            return Ok(status);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting plugin status");
+            return StatusCode(500, "Internal server error");
+        }
+    }
+
+    /// <summary>
+    /// Triggers the scheduled task to process ID3 tags for all audio items in the library.
+    /// </summary>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The processing result.</returns>
+    [HttpPost("ProcessAll")]
+    public ActionResult<ProcessingResult> ProcessAllAudioItems(CancellationToken cancellationToken)
+    {
+        try
+        {
+            _logger.LogInformation("Manual bulk tag processing requested");
+
+            var refreshTask = _taskManager.ScheduledTasks.FirstOrDefault(t => t.ScheduledTask.Key == "ProcessMusicTags");
+            if (refreshTask != null)
+            {
+                _logger.LogInformation("Triggering MusicTags processing task");
+                _taskManager.Execute(refreshTask, new TaskOptions());
+                
+                var result = new ProcessingResult
+                {
+                    Success = true,
+                    Message = "Music tag processing task has been triggered. Processing will begin shortly.",
+                    Timestamp = DateTime.UtcNow
+                };
+
+                return Ok(result);
+            }
+            else
+            {
+                _logger.LogWarning("MusicTags processing task not found");
+                var result = new ProcessingResult
+                {
+                    Success = false,
+                    Message = "MusicTags processing task not found",
+                    Timestamp = DateTime.UtcNow
+                };
+
+                return StatusCode(500, result);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error triggering MusicTags processing task");
+            
+            var result = new ProcessingResult
+            {
+                Success = false,
+                Message = $"Error triggering processing task: {ex.Message}",
+                Timestamp = DateTime.UtcNow
+            };
+
+            return StatusCode(500, result);
+        }
+    }
+
+    /// <summary>
+    /// Removes specified tags from all audio items in the library.
+    /// </summary>
+    /// <param name="request">The request containing tags to remove.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The processing result.</returns>
+    [HttpPost("RemoveTags")]
+    public async Task<ActionResult<ProcessingResult>> RemoveTags([FromBody] RemoveTagsRequest request, CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(request.TagsToRemove))
+            {
+                return BadRequest(new ProcessingResult
+                {
+                    Success = false,
+                    Message = "No tags specified for removal",
+                    Timestamp = DateTime.UtcNow
+                });
+            }
+
+            _logger.LogInformation("Manual tag removal requested for tags: {TagsToRemove}", request.TagsToRemove);
+
+            // Create the MusicTagService with the current configuration
+            var serviceLogger = _loggerFactory.CreateLogger<MusicTagService>();
+            var configuration = Plugin.Instance?.Configuration ?? new PluginConfiguration();
+            var musicTagService = new MusicTagService(serviceLogger, _libraryManager, _applicationPaths, configuration);
+
+            // Remove the specified tags from all audio items
+            await musicTagService.RemoveTagsFromAllAudioItemsAsync(request.TagsToRemove, cancellationToken).ConfigureAwait(false);
+            
+            var result = new ProcessingResult
+            {
+                Success = true,
+                Message = $"Successfully removed tags: {request.TagsToRemove}",
+                Timestamp = DateTime.UtcNow
+            };
+
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error removing tags: {TagsToRemove}", request.TagsToRemove);
+            
+            var result = new ProcessingResult
+            {
+                Success = false,
+                Message = $"Error removing tags: {ex.Message}",
+                Timestamp = DateTime.UtcNow
+            };
+
+            return StatusCode(500, result);
+        }
+    }
+
+
+}
+
+/// <summary>
+/// Request model for removing tags.
+/// </summary>
+public class RemoveTagsRequest
+{
+    /// <summary>
+    /// Gets or sets the comma-separated list of tag names to remove.
+    /// </summary>
+    public string TagsToRemove { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Plugin status information.
+/// </summary>
+public class PluginStatus
+{
+    /// <summary>
+    /// Gets or sets the total number of audio items in the library.
+    /// </summary>
+    public int TotalAudioItems { get; set; }
+
+    /// <summary>
+    /// Gets or sets the comma-separated list of tag names to extract.
+    /// </summary>
+    public string TagNames { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether existing tags should be overwritten.
+    /// </summary>
+    public bool OverwriteExistingTags { get; set; }
+}
+
+/// <summary>
+/// Processing result information.
+/// </summary>
+public class ProcessingResult
+{
+    /// <summary>
+    /// Gets or sets a value indicating whether the processing was successful.
+    /// </summary>
+    public bool Success { get; set; }
+
+    /// <summary>
+    /// Gets or sets the result message.
+    /// </summary>
+    public string Message { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the processing timestamp.
+    /// </summary>
+    public DateTime Timestamp { get; set; }
+} 

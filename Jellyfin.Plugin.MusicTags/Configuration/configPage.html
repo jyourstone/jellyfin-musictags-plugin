@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>MusicTags</title>
+</head>
+<body>
+    <div id="MusicTagsConfigPage" data-role="page" class="page type-interior pluginConfigurationPage" data-require="emby-input,emby-button,emby-select,emby-checkbox">
+        <div data-role="content">
+            <div class="content-primary">
+                <form id="MusicTagsConfigForm">
+                    <h1>MusicTags</h1>
+                    <h3 class="sectionTitle">Tag Extraction Settings</h3>
+                    
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="TagNames">Tag Names to Extract</label>
+                        <input id="TagNames" name="TagNames" type="text" is="emby-input" />
+                        <div class="fieldDescription">
+                            Comma-separated list of tag names to extract from audio files (e.g., "BPM,KEY"). 
+                            These will be added to Jellyfin as tags in the format "TagName:Value" (e.g., "BPM:141").
+                            <br/><br/>
+                            <strong>Supported formats:</strong>
+                            <br/>
+                            • <strong>Standard ID3 tags:</strong> BPM, Comment, etc.
+                            <br/>
+                            • <strong>ID3v2 custom frames:</strong> Key, Mood, etc.
+                            <br/>
+                            • <strong>Vorbis comments (FLAC/OGG):</strong> Any custom field name.
+                            <br/>
+                            • <strong>Dynamic extraction:</strong> The plugin will attempt to extract any tag name you specify!
+                        </div>
+                    </div>
+
+                    <h3 class="sectionTitle">Processing Options</h3>
+                    
+                    <div class="checkboxContainer checkboxContainer-withDescription">
+                        <label class="emby-checkbox-label">
+                            <input id="OverwriteExistingTags" name="OverwriteExistingTags" type="checkbox" is="emby-checkbox" />
+                            <span>Overwrite Existing Tags</span>
+                        </label>
+                        <div class="fieldDescription">Replace existing tags with extracted tags</div>
+                    </div>
+
+                    <h3 class="sectionTitle">Tag Cleanup</h3>
+                    
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="TagsToRemove">Tag Names to Remove</label>
+                        <input id="TagsToRemove" name="TagsToRemove" type="text" is="emby-input" placeholder="e.g., BPM,AB:GENRE" />
+                        <div class="fieldDescription">
+                            Comma-separated list of tag names to remove from Jellyfin metadata. Enter just the tag name without the colon and value.
+                            <br/><br/>
+                            <strong>Examples:</strong>
+                            <br/>
+                            • To remove "BPM:141" from all items, enter "BPM"
+                            <br/>
+                            • To remove "AB:GENRE:Rock" from all items, enter "AB:GENRE"
+                            <br/>
+                            • <strong>Warning:</strong> This will remove ALL instances of these tag names from your library
+                        </div>
+                    </div>
+                    
+                    <div class="inputContainer">
+                        <button id="removeTagsButton" is="emby-button" type="button" class="raised block emby-button">
+                            <span>Remove Tags Now</span>
+                        </button>
+                        <div class="fieldDescription">Immediately remove the specified tags from all audio files in your library</div>
+                    </div>
+                    
+                    <div>
+                        <button is="emby-button" type="submit" class="raised button-submit block emby-button">
+                            <span>Save</span>
+                        </button>
+                    </div>
+                    
+                    <div class="inputContainer">
+                        <button id="processTagsButton" is="emby-button" type="button" class="raised block emby-button">
+                            <span>Process All Music Tags Now</span>
+                        </button>
+                        <div class="fieldDescription">Immediately process tags for all audio files in your library</div>
+                    </div>
+                </form>
+            </div>
+        </div>
+        <script type="text/javascript">
+            var MusicTagsConfig = {
+                pluginUniqueId: '25EE643C-8A32-41BE-B165-E9CA0B57E769'
+            };
+
+            document.querySelector('#MusicTagsConfigPage')
+                .addEventListener('pageshow', function() {
+                    Dashboard.showLoadingMsg();
+                    ApiClient.getPluginConfiguration(MusicTagsConfig.pluginUniqueId).then(function (config) {
+                        document.querySelector('#TagNames').value = config.TagNames || '';
+                        document.querySelector('#OverwriteExistingTags').checked = config.OverwriteExistingTags || false;
+                        Dashboard.hideLoadingMsg();
+                    });
+                });
+
+            document.querySelector('#MusicTagsConfigForm')
+                .addEventListener('submit', function(e) {
+                    Dashboard.showLoadingMsg();
+                    ApiClient.getPluginConfiguration(MusicTagsConfig.pluginUniqueId).then(function (config) {
+                        config.TagNames = document.querySelector('#TagNames').value;
+                        config.OverwriteExistingTags = document.querySelector('#OverwriteExistingTags').checked;
+                        ApiClient.updatePluginConfiguration(MusicTagsConfig.pluginUniqueId, config).then(function (result) {
+                            Dashboard.processPluginConfigurationUpdateResult(result);
+                        });
+                    });
+
+                    e.preventDefault();
+                    return false;
+                });
+
+            document.querySelector('#removeTagsButton')
+                .addEventListener('click', function(e) {
+                    e.preventDefault();
+                    
+                    var tagsToRemove = document.querySelector('#TagsToRemove').value.trim();
+                    if (!tagsToRemove) {
+                        Dashboard.alert('Please enter tag names to remove.');
+                        return;
+                    }
+                    
+                    if (!confirm('Are you sure you want to remove the tags "' + tagsToRemove + '" from all audio files? This action cannot be undone.')) {
+                        return;
+                    }
+                    
+                    var button = e.target.closest('button');
+                    var span = button.querySelector('span');
+                    var originalText = span.textContent;
+                    
+                    button.disabled = true;
+                    span.textContent = 'Removing...';
+                    
+                    ApiClient.ajax({
+                        type: 'POST',
+                        url: ApiClient.getUrl('MusicTags/RemoveTags'),
+                        data: JSON.stringify({ TagsToRemove: tagsToRemove }),
+                        headers: {
+                            'Content-Type': 'application/json'
+                        }
+                    }).then(function(response) {
+                        button.disabled = false;
+                        span.textContent = originalText;
+                        document.querySelector('#TagsToRemove').value = '';
+                        Dashboard.alert('Tags removed successfully!');
+                    }).catch(function(error) {
+                        button.disabled = false;
+                        span.textContent = originalText;
+                        console.error('API Error:', error);
+                        Dashboard.alert('Error removing tags. Check server logs for details.');
+                    });
+                });
+
+            document.querySelector('#processTagsButton')
+                .addEventListener('click', function(e) {
+                    e.preventDefault();
+                    
+                    var button = e.target.closest('button');
+                    var span = button.querySelector('span');
+                    var originalText = span.textContent;
+                    
+                    button.disabled = true;
+                    span.textContent = 'Processing...';
+                    
+                    ApiClient.ajax({
+                        type: 'POST',
+                        url: ApiClient.getUrl('MusicTags/ProcessAll'),
+                        headers: {
+                            'Content-Type': 'application/json'
+                        }
+                    }).then(function(response) {
+                        button.disabled = false;
+                        span.textContent = originalText;
+                        Dashboard.alert('Tag processing completed successfully!');
+                    }).catch(function(error) {
+                        button.disabled = false;
+                        span.textContent = originalText;
+                        console.error('API Error:', error);
+                        Dashboard.alert('Error processing tags. Check server logs for details.');
+                    });
+                });
+        </script>
+    </div>
+</body>
+</html>
