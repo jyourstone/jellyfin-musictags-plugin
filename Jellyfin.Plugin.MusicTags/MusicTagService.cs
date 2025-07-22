@@ -6,17 +6,11 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Data.Enums;
-using Jellyfin.Data.Entities;
 using Jellyfin.Plugin.MusicTags.Configuration;
-using MediaBrowser.Common.Configuration;
-using MediaBrowser.Controller;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Entities.Audio;
 using MediaBrowser.Controller.Library;
-using MediaBrowser.Model.Entities;
-using MediaBrowser.Model.Querying;
 using Microsoft.Extensions.Logging;
-using TagLib;
 
 namespace Jellyfin.Plugin.MusicTags;
 
@@ -26,12 +20,10 @@ namespace Jellyfin.Plugin.MusicTags;
 public class MusicTagService(
     ILogger<MusicTagService> logger,
     ILibraryManager libraryManager,
-    IApplicationPaths applicationPaths,
     PluginConfiguration configuration)
 {
     private readonly ILogger<MusicTagService> _logger = logger;
     private readonly ILibraryManager _libraryManager = libraryManager;
-    private readonly IApplicationPaths _applicationPaths = applicationPaths;
     private readonly PluginConfiguration _configuration = configuration;
 
     /// <summary>
@@ -50,7 +42,7 @@ public class MusicTagService(
                 return;
             }
 
-            if (!global::System.IO.File.Exists(audioItem.Path))
+            if (!File.Exists(audioItem.Path))
             {
                 _logger.LogWarning("Audio file does not exist: {Path}", audioItem.Path);
                 return;
@@ -65,7 +57,7 @@ public class MusicTagService(
                 _logger.LogWarning("File path: {Path}", audioItem.Path);
             }
 
-            using var file = global::TagLib.File.Create(audioItem.Path);
+            using var file = TagLib.File.Create(audioItem.Path);
             if (file == null)
             {
                 _logger.LogWarning("Could not create TagLib file for: {Path}", audioItem.Path);
@@ -142,7 +134,7 @@ public class MusicTagService(
             {
                 await AddTagsToAudioItemAsync(audioItem, extractedTags, cancellationToken).ConfigureAwait(false);
                 
-                _logger.LogInformation("Extracted {Count} tags from {Name}: {Tags}",
+                _logger.LogDebug("Extracted {Count} tags from {Name}: {Tags}",
                     extractedTags.Count, audioItem.Name, string.Join(", ", extractedTags));
             }
         }
@@ -168,7 +160,7 @@ public class MusicTagService(
             var rawTagNames = _configuration.TagNames;
             if (rawTagNames.StartsWith('"') && rawTagNames.EndsWith('"'))
             {
-                rawTagNames = rawTagNames.Substring(1, rawTagNames.Length - 2);
+                rawTagNames = rawTagNames[1..^1];
             }
             
             var tagNames = rawTagNames
@@ -504,7 +496,7 @@ public class MusicTagService(
     {
         try
         {
-            var existingTags = audioItem.Tags?.ToList() ?? new List<string>();
+            var existingTags = audioItem.Tags?.ToList() ?? [];
             var newTags = new List<string>();
 
             foreach (var tag in tags)
@@ -518,14 +510,14 @@ public class MusicTagService(
                     continue;
                 }
                 
-                var tagName = tag.Substring(0, lastColonIndex);
+                var tagName = tag[..lastColonIndex];
                 
                 // Check if a tag with the same name already exists
                 var existingTagWithSameName = existingTags.FirstOrDefault(t => 
                 {
                     var existingLastColonIndex = t.LastIndexOf(':');
                     if (existingLastColonIndex == -1) return false;
-                    var existingTagName = t.Substring(0, existingLastColonIndex);
+                    var existingTagName = t[..existingLastColonIndex];
                     return existingTagName.Equals(tagName, StringComparison.OrdinalIgnoreCase);
                 });
                 
@@ -541,7 +533,7 @@ public class MusicTagService(
                     {
                         var existingLastColonIndex = t.LastIndexOf(':');
                         if (existingLastColonIndex == -1) return false;
-                        var existingTagName = t.Substring(0, existingLastColonIndex);
+                        var existingTagName = t[..existingLastColonIndex];
                         return existingTagName.Equals(tagName, StringComparison.OrdinalIgnoreCase);
                     });
                     newTags.Add(tag);
@@ -556,7 +548,7 @@ public class MusicTagService(
             if (newTags.Count > 0)
             {
                 existingTags.AddRange(newTags);
-                audioItem.Tags = existingTags.ToArray();
+                audioItem.Tags = [..existingTags];
                 
                 // Update the item in the library
                 await _libraryManager.UpdateItemAsync(audioItem, audioItem, ItemUpdateType.MetadataEdit, cancellationToken).ConfigureAwait(false);
@@ -697,7 +689,7 @@ public class MusicTagService(
                 return; // No tags to remove
             }
 
-            var existingTags = audioItem.Tags?.ToList() ?? new List<string>();
+            var existingTags = audioItem.Tags?.ToList() ?? [];
             var tagNamesToRemove = tagsToRemove
                 .Split(',', StringSplitOptions.RemoveEmptyEntries)
                 .Select(name => name.Trim())
@@ -723,7 +715,7 @@ public class MusicTagService(
                     continue;
                 }
 
-                var existingTagName = existingTag.Substring(0, lastColonIndex);
+                var existingTagName = existingTag[..lastColonIndex];
                 
                 // Check if this tag should be removed
                 var shouldRemove = tagNamesToRemove.Any(tagToRemove => 
@@ -742,7 +734,7 @@ public class MusicTagService(
 
             if (removedCount > 0)
             {
-                audioItem.Tags = tagsToKeep.ToArray();
+                audioItem.Tags = [..tagsToKeep];
                 
                 // Update the item in the library
                 await _libraryManager.UpdateItemAsync(audioItem, audioItem, ItemUpdateType.MetadataEdit, cancellationToken).ConfigureAwait(false);

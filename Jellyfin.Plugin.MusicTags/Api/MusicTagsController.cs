@@ -3,9 +3,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.MusicTags.Configuration;
-using MediaBrowser.Common.Configuration;
 using MediaBrowser.Controller.Library;
-using MediaBrowser.Model.Entities;
 using MediaBrowser.Model.Tasks;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -23,22 +21,19 @@ public class MusicTagsController(
     ILogger<MusicTagsController> logger,
     ILibraryManager libraryManager,
     ITaskManager taskManager,
-    ILoggerFactory loggerFactory,
-    IApplicationPaths applicationPaths) : ControllerBase
+    ILoggerFactory loggerFactory) : ControllerBase
 {
     private readonly ILogger<MusicTagsController> _logger = logger;
     private readonly ILibraryManager _libraryManager = libraryManager;
     private readonly ITaskManager _taskManager = taskManager;
     private readonly ILoggerFactory _loggerFactory = loggerFactory;
-    private readonly IApplicationPaths _applicationPaths = applicationPaths;
 
     /// <summary>
     /// Gets the plugin status and statistics.
     /// </summary>
-    /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The plugin status.</returns>
     [HttpGet("Status")]
-    public ActionResult<PluginStatus> GetStatus(CancellationToken cancellationToken)
+    public ActionResult<PluginStatus> GetStatus()
     {
         try
         {
@@ -64,10 +59,9 @@ public class MusicTagsController(
     /// <summary>
     /// Triggers the scheduled task to process ID3 tags for all audio items in the library.
     /// </summary>
-    /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The processing result.</returns>
     [HttpPost("ProcessAll")]
-    public ActionResult<ProcessingResult> ProcessAllAudioItems(CancellationToken cancellationToken)
+    public ActionResult<ProcessingResult> ProcessAllAudioItems()
     {
         try
         {
@@ -142,7 +136,7 @@ public class MusicTagsController(
             // Create the MusicTagService with the current configuration
             var serviceLogger = _loggerFactory.CreateLogger<MusicTagService>();
             var configuration = Plugin.Instance?.Configuration ?? new PluginConfiguration();
-            var musicTagService = new MusicTagService(serviceLogger, _libraryManager, _applicationPaths, configuration);
+            var musicTagService = new MusicTagService(serviceLogger, _libraryManager, configuration);
 
             // Remove the specified tags from all audio items
             await musicTagService.RemoveTagsFromAllAudioItemsAsync(request.TagsToRemove, cancellationToken).ConfigureAwait(false);

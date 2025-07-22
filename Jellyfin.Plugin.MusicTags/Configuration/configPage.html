@@ -66,17 +66,17 @@
                         <div class="fieldDescription">Immediately remove the specified tags from all audio files in your library</div>
                     </div>
                     
-                    <div>
-                        <button is="emby-button" type="submit" class="raised button-submit block emby-button">
-                            <span>Save</span>
-                        </button>
-                    </div>
-                    
                     <div class="inputContainer">
                         <button id="processTagsButton" is="emby-button" type="button" class="raised block emby-button">
                             <span>Process All Music Tags Now</span>
                         </button>
                         <div class="fieldDescription">Immediately process tags for all audio files in your library</div>
+                    </div>
+
+                    <div>
+                        <button is="emby-button" type="submit" class="raised button-submit block emby-button">
+                            <span>Save</span>
+                        </button>
                     </div>
                 </form>
             </div>
@@ -143,7 +143,7 @@
                         button.disabled = false;
                         span.textContent = originalText;
                         document.querySelector('#TagsToRemove').value = '';
-                        Dashboard.alert('Tags removed successfully!');
+                        Dashboard.alert('Tag removal started, this can take a while if you have a large music library.');
                     }).catch(function(error) {
                         button.disabled = false;
                         span.textContent = originalText;
@@ -172,7 +172,7 @@
                     }).then(function(response) {
                         button.disabled = false;
                         span.textContent = originalText;
-                        Dashboard.alert('Tag processing completed successfully!');
+                        Dashboard.alert('Tag processing started, this can take a while if you have a large music library.');
                     }).catch(function(error) {
                         button.disabled = false;
                         span.textContent = originalText;

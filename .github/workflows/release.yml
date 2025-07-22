@@ -42,10 +42,11 @@ jobs:
           zip -X ../Jellyfin.Plugin.MusicTags_${{ github.ref_name }}.zip *
           cd ..
 
+      # nosemgrep: github.actions.security.secrets.custom-secret-name
       - name: Get Release Notes
         id: get_release_notes
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PAT: ${{ secrets.PAT }}
         run: |
           set -e
           echo "Getting release notes for tag: ${{ github.ref_name }}"
@@ -102,7 +103,7 @@ jobs:
           # Method 4: Use GitHub API as fallback
           if [ -z "$TAG_MESSAGE" ]; then
             echo "=== Method 4: Using GitHub API as fallback ==="
-            API_RESPONSE=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
+            API_RESPONSE=$(curl -s -H "Authorization: token $PAT" \
               "https://api.github.com/repos/${{ github.repository }}/git/tags/$(git rev-parse ${{ github.ref_name }})" 2>/dev/null || echo "")
             
             if [ -n "$API_RESPONSE" ]; then
@@ -145,21 +146,23 @@ jobs:
             echo 'EOM'
           } >> "$GITHUB_OUTPUT"
 
+      # nosemgrep: github.actions.security.secrets.custom-secret-name
       - name: Create Release
         id: create_release
         uses: softprops/action-gh-release@v2
         with:
           name: Release ${{ github.ref_name }}
           body: ${{ steps.get_release_notes.outputs.release_notes }}
-          files: ./Jellyfin.Plugin.MusicTags${{ github.ref_name }}.zip
+          files: ./Jellyfin.Plugin.MusicTags_${{ github.ref_name }}.zip
           draft: false
           prerelease: false
           generate_release_notes: false
           token: ${{ secrets.PAT }}
 
+      # nosemgrep: github.actions.security.secrets.custom-secret-name
       - name: Update External Manifest
         env:
-          GITHUB_TOKEN: ${{ secrets.PAT }}
+          PAT: ${{ secrets.PAT }}
         run: |
           # 1. Set up variables
           VERSION=$(echo "${{ github.ref_name }}" | sed 's/v//')
