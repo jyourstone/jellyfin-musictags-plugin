@@ -34,7 +34,7 @@ public class MusicTagService(
     /// <returns>A task representing the asynchronous operation.</returns>
     public async Task ProcessAudioItemAsync(Audio audioItem, CancellationToken cancellationToken)
     {
-        var wasModified = ProcessAudioItemInternal(audioItem, cancellationToken);
+        var wasModified = ProcessAudioItemInternal(audioItem);
         if (wasModified)
         {
             await _libraryManager.UpdateItemAsync(audioItem, audioItem, ItemUpdateType.MetadataEdit, cancellationToken).ConfigureAwait(false);
@@ -373,82 +373,7 @@ public class MusicTagService(
         }
     }
 
-    /// <summary>
-    /// Adds tags to the audio item.
-    /// </summary>
-    /// <param name="audioItem">The audio item.</param>
-    /// <param name="tags">The tags to add.</param>
-    /// <param name="cancellationToken">The cancellation token.</param>
-    /// <returns>A task representing the asynchronous operation.</returns>
-    private async Task AddTagsToAudioItemAsync(Audio audioItem, List<string> tags, CancellationToken cancellationToken)
-    {
-        try
-        {
-            var existingTags = audioItem.Tags?.ToList() ?? [];
-            var newTags = new List<string>();
 
-            foreach (var tag in tags)
-            {
-                // Extract tag name (everything before the last colon, which is the separator)
-                var lastColonIndex = tag.LastIndexOf(':');
-                if (lastColonIndex == -1)
-                {
-                    // No colon found, skip this tag
-                    _logger.LogWarning("Invalid tag format (no colon separator): {Tag}", tag);
-                    continue;
-                }
-                
-                var tagName = tag[..lastColonIndex];
-                
-                // Check if a tag with the same name already exists
-                var existingTagWithSameName = existingTags.FirstOrDefault(t => 
-                {
-                    var existingLastColonIndex = t.LastIndexOf(':');
-                    if (existingLastColonIndex == -1) return false;
-                    var existingTagName = t[..existingLastColonIndex];
-                    return existingTagName.Equals(tagName, StringComparison.OrdinalIgnoreCase);
-                });
-                
-                if (existingTagWithSameName == null)
-                {
-                    // Tag name doesn't exist, add it
-                    newTags.Add(tag);
-                }
-                else if (_configuration.OverwriteExistingTags)
-                {
-                    // Overwrite is enabled, remove existing tag and add new one
-                    existingTags.RemoveAll(t => 
-                    {
-                        var existingLastColonIndex = t.LastIndexOf(':');
-                        if (existingLastColonIndex == -1) return false;
-                        var existingTagName = t[..existingLastColonIndex];
-                        return existingTagName.Equals(tagName, StringComparison.OrdinalIgnoreCase);
-                    });
-                    newTags.Add(tag);
-                }
-                else
-                {
-                    // Overwrite is disabled and tag name exists, skip it
-                    _logger.LogDebug("Skipping tag '{Tag}' for {Name} (overwrite disabled)", tag, audioItem.Name);
-                }
-            }
-
-            if (newTags.Count > 0)
-            {
-                existingTags.AddRange(newTags);
-                audioItem.Tags = [..existingTags];
-                
-                // Update the item in the library
-                await _libraryManager.UpdateItemAsync(audioItem, audioItem, ItemUpdateType.MetadataEdit, cancellationToken).ConfigureAwait(false);
-                
-                _logger.LogDebug("Added {Count} new tags to {Name}", newTags.Count, audioItem.Name);
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error adding tags to audio item {Name}", audioItem.Name);
-        }
-    }
 
     /// <summary>
     /// Removes specified tags from all audio items in the library.
@@ -523,7 +448,7 @@ public class MusicTagService(
                         {
                             _logger.LogInformation("Processed {Count}/{Total} audio items for tag removal ({Percentage:F1}%)", 
                                 processedCount, audioItems.Count, 
-                                (processedCount * 100.0) / audioItems.Count);
+                                processedCount * 100.0 / audioItems.Count);
                         }
                     }
                 }
@@ -641,7 +566,7 @@ public class MusicTagService(
                         return;
                     }
 
-                    var wasUpdated = ProcessAudioItemInternal(audioItem, cancellationToken);
+                    var wasUpdated = ProcessAudioItemInternal(audioItem);
                     if (wasUpdated)
                     {
                         itemsToUpdate.Add(audioItem);
@@ -655,7 +580,7 @@ public class MusicTagService(
                         {
                             _logger.LogInformation("Processed {Count}/{Total} audio items ({Percentage:F1}%)", 
                                 processedCount, audioItems.Count, 
-                                (processedCount * 100.0) / audioItems.Count);
+                                processedCount * 100.0 / audioItems.Count);
                         }
                     }
                 }
@@ -719,9 +644,8 @@ public class MusicTagService(
     /// Internal method to process audio item without database updates.
     /// </summary>
     /// <param name="audioItem">The audio item to process.</param>
-    /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>True if the item was modified and needs database update, false otherwise.</returns>
-    private bool ProcessAudioItemInternal(Audio audioItem, CancellationToken cancellationToken)
+    private bool ProcessAudioItemInternal(Audio audioItem)
     {
         TagLib.File? file = null;
         try
@@ -935,21 +859,7 @@ public class MusicTagService(
         }
     }
 
-    /// <summary>
-    /// Removes specified tags from an audio item (backwards compatibility method).
-    /// </summary>
-    /// <param name="audioItem">The audio item to process.</param>
-    /// <param name="tagsToRemove">Comma-separated list of tag names to remove.</param>
-    /// <param name="cancellationToken">The cancellation token.</param>
-    /// <returns>A task representing the asynchronous operation.</returns>
-    private async Task RemoveTagsAsync(Audio audioItem, string tagsToRemove, CancellationToken cancellationToken)
-    {
-        var wasModified = RemoveTagsInternal(audioItem, tagsToRemove);
-        if (wasModified)
-        {
-            await _libraryManager.UpdateItemAsync(audioItem, audioItem, ItemUpdateType.MetadataEdit, cancellationToken).ConfigureAwait(false);
-        }
-    }
+
 
     /// <summary>
     /// Extracts a tag from Vorbis comments (used by FLAC, OGG, etc.).
