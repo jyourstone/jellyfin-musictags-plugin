@@ -40,11 +40,21 @@ public class MusicTagsController(
             var audioCount = 0; // TODO: Implement proper audio item counting
 
             var configuration = Plugin.Instance?.Configuration ?? new PluginConfiguration();
+            
+            // Check if the MusicTags processing task is currently running
+            var isTaskRunning = false;
+            var refreshTask = _taskManager.ScheduledTasks.FirstOrDefault(t => t.ScheduledTask.Key == "ProcessMusicTags");
+            if (refreshTask != null)
+            {
+                isTaskRunning = refreshTask.State == TaskState.Running;
+            }
+
             var status = new PluginStatus
             {
                 TotalAudioItems = audioCount,
                 TagNames = configuration.TagNames,
-                OverwriteExistingTags = configuration.OverwriteExistingTags
+                OverwriteExistingTags = configuration.OverwriteExistingTags,
+                IsTaskRunning = isTaskRunning
             };
 
             return Ok(status);
@@ -70,17 +80,31 @@ public class MusicTagsController(
             var refreshTask = _taskManager.ScheduledTasks.FirstOrDefault(t => t.ScheduledTask.Key == "ProcessMusicTags");
             if (refreshTask != null)
             {
+                // Check if the task is already running
+                if (refreshTask.State == TaskState.Running)
+                {
+                    _logger.LogWarning("MusicTags processing task is already running");
+                    var runningResult = new ProcessingResult
+                    {
+                        Success = false,
+                        Message = "Music tag processing is already running. Please wait for the current scan to complete before starting a new one.",
+                        Timestamp = DateTime.UtcNow
+                    };
+
+                    return Conflict(runningResult);
+                }
+
                 _logger.LogInformation("Triggering MusicTags processing task");
                 _taskManager.Execute(refreshTask, new TaskOptions());
                 
-                var result = new ProcessingResult
+                var successResult = new ProcessingResult
                 {
                     Success = true,
                     Message = "Music tag processing task has been triggered. Processing will begin shortly.",
                     Timestamp = DateTime.UtcNow
                 };
 
-                return Ok(result);
+                return Ok(successResult);
             }
             else
             {
@@ -198,6 +222,11 @@ public class PluginStatus
     /// Gets or sets a value indicating whether existing tags should be overwritten.
     /// </summary>
     public bool OverwriteExistingTags { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the MusicTags processing task is currently running.
+    /// </summary>
+    public bool IsTaskRunning { get; set; }
 }
 
 /// <summary>

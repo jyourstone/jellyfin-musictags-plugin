@@ -27,120 +27,17 @@ public class MusicTagService(
     private readonly PluginConfiguration _configuration = configuration;
 
     /// <summary>
-    /// Processes ID3 tags for a specific audio item.
+    /// Processes ID3 tags for a specific audio item (backwards compatibility method).
     /// </summary>
     /// <param name="audioItem">The audio item to process.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>A task representing the asynchronous operation.</returns>
     public async Task ProcessAudioItemAsync(Audio audioItem, CancellationToken cancellationToken)
     {
-        try
+        var wasModified = ProcessAudioItemInternal(audioItem, cancellationToken);
+        if (wasModified)
         {
-            if (audioItem == null || string.IsNullOrEmpty(audioItem.Path))
-            {
-                _logger.LogWarning("Audio item or path is null, skipping tag extraction");
-                return;
-            }
-
-            if (!File.Exists(audioItem.Path))
-            {
-                _logger.LogWarning("Audio file does not exist: {Path}", audioItem.Path);
-                return;
-            }
-
-            _logger.LogDebug("Processing ID3 tags for: {Name} ({Path})", audioItem.Name, audioItem.Path);
-        
-                    // Enhanced debugging for specific track
-            if (audioItem.Name?.Contains("Shivers", StringComparison.OrdinalIgnoreCase) == true)
-            {
-                _logger.LogWarning("=== DETAILED SHIVERS DEBUGGING ===");
-                _logger.LogWarning("File path: {Path}", audioItem.Path);
-            }
-
-            using var file = TagLib.File.Create(audioItem.Path);
-            if (file == null)
-            {
-                _logger.LogWarning("Could not create TagLib file for: {Path}", audioItem.Path);
-                return;
-            }
-            
-            // Enhanced debugging for Shivers to see what tags are actually available
-            if (audioItem.Name?.Contains("Shivers", StringComparison.OrdinalIgnoreCase) == true)
-            {
-                _logger.LogWarning("File type: {FileType}", file.GetType().Name);
-                _logger.LogWarning("Mime type: {MimeType}", file.MimeType);
-                
-                // Check what tag types are available
-                if (file.GetTag(TagLib.TagTypes.Id3v2) != null)
-                {
-                    _logger.LogWarning("✓ ID3v2 tags are available");
-                    
-                    // Show all available ID3v2 frames
-                    if (file.GetTag(TagLib.TagTypes.Id3v2) is TagLib.Id3v2.Tag id3v2Tag)
-                    {
-                        var frameIds = new List<string>();
-                        foreach (var frame in id3v2Tag)
-                        {
-                            if (frame != null)
-                            {
-                                frameIds.Add(frame.FrameId.ToString());
-                            }
-                        }
-                        _logger.LogWarning("ID3v2 frames: [{Frames}]", string.Join(", ", frameIds.Distinct()));
-                        
-                        // Test specific AB frames
-                        var testFrames = new[] { "AB", "AB:GENRE", "AB:MOOD", "ABGE", "ABMO" };
-                        foreach (var testFrame in testFrames)
-                        {
-                            var frames = id3v2Tag.GetFrames(testFrame);
-                            if (frames.Any())
-                            {
-                                _logger.LogWarning("Found ID3v2 frame '{Frame}': {Count} instances", testFrame, frames.Count());
-                            }
-                        }
-                    }
-                }
-                else
-                {
-                    _logger.LogWarning("✗ No ID3v2 tags");
-                }
-                
-                if (file.GetTag(TagLib.TagTypes.Xiph) != null)
-                {
-                    _logger.LogWarning("✓ Vorbis comments are available");
-                }
-                else
-                {
-                    _logger.LogWarning("✗ No Vorbis comments");
-                }
-                
-                _logger.LogWarning("General tag BPM: {BPM}", file.Tag.BeatsPerMinute);
-                _logger.LogWarning("=== END SHIVERS DEBUGGING ===");
-            }
-
-            // No longer removing configured tags since we moved to one-time removal
-
-            var extractedTags = new List<string>();
-
-            // Extract all configured tags
-            if (!string.IsNullOrWhiteSpace(_configuration.TagNames))
-            {
-                var tags = ExtractConfiguredTags(file);
-                extractedTags.AddRange(tags);
-            }
-
-            // Add extracted tags to the audio item
-            if (extractedTags.Count > 0)
-            {
-                await AddTagsToAudioItemAsync(audioItem, extractedTags, cancellationToken).ConfigureAwait(false);
-                
-                _logger.LogDebug("Extracted {Count} tags from {Name}: {Tags}",
-                    extractedTags.Count, audioItem.Name, string.Join(", ", extractedTags));
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error processing ID3 tags for {Name}", audioItem?.Name ?? "unknown");
+            await _libraryManager.UpdateItemAsync(audioItem, audioItem, ItemUpdateType.MetadataEdit, cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -235,8 +132,8 @@ public class MusicTagService(
                 "CONTENTGROUP" => ExtractId3v2TextFrame(file, "TIT1"),
                 "LANGUAGE" => ExtractId3v2TextFrame(file, "TLAN"),
                 
-                // Try to extract as a generic ID3v2 frame if not found above
-                _ => ExtractId3v2TextFrame(file, tagName) ?? ExtractVorbisComment(file, tagName) ?? ExtractGenericTag(file, tagName)
+                // Try to extract from different tag types based on tag name format
+                _ => ExtractCustomTag(file, tagName)
             };
         }
         catch (Exception ex)
@@ -347,11 +244,7 @@ public class MusicTagService(
     {
         try
         {
-            // Enhanced debugging for Shivers
-            if (file.Name?.Contains("Shivers", StringComparison.OrdinalIgnoreCase) == true)
-            {
-                _logger.LogWarning("=== SHIVERS KEY TAG EXTRACTION DEBUGGING ===");
-            }
+
             
             // First, try to get the key from standard TagLib properties
             // This should work for most audio formats
@@ -364,42 +257,7 @@ public class MusicTagService(
             
             if (file.GetTag(TagLib.TagTypes.Id3v2) is TagLib.Id3v2.Tag id3v2Tag)
             {
-                // Enhanced debugging for Shivers to show all available ID3v2 frames
-                if (file.Name?.Contains("Shivers", StringComparison.OrdinalIgnoreCase) == true)
-                {
-                    _logger.LogWarning("=== SHIVERS ID3V2 FRAME DEBUGGING ===");
-                    
-                    // List all available ID3v2 frames
-                    var allFrames = id3v2Tag.GetFrames();
-                    _logger.LogWarning("Total ID3v2 frames found: {Count}", allFrames.Count());
-                    
-                    foreach (var frame in allFrames)
-                    {
-                        if (frame != null)
-                        {
-                            _logger.LogWarning("ID3v2 frame: {FrameId} - Type: {FrameType}", frame.FrameId, frame.GetType().Name);
-                            
-                            // Try to extract text content from various frame types
-                            if (frame is TagLib.Id3v2.TextInformationFrame textFrame)
-                            {
-                                var text = textFrame.Text.FirstOrDefault();
-                                if (!string.IsNullOrEmpty(text))
-                                {
-                                    _logger.LogWarning("  Text frame content: '{Content}'", text);
-                                }
-                            }
-                            else if (frame is TagLib.Id3v2.UserTextInformationFrame userFrame)
-                            {
-                                var text = userFrame.Text.FirstOrDefault();
-                                if (!string.IsNullOrEmpty(text))
-                                {
-                                    _logger.LogWarning("  User text frame content: '{Content}'", text);
-                                }
-                            }
-                        }
-                    }
-                    _logger.LogWarning("=== END SHIVERS ID3V2 FRAME DEBUGGING ===");
-                }
+
                 
                 // Try multiple possible frame IDs for key information
                 var possibleFrameIds = new[] { "TKEY", "TXXX", "WXXX" };
@@ -453,10 +311,6 @@ public class MusicTagService(
             }
             
             // Also try to extract from Vorbis comments if available
-            if (file.Name?.Contains("Shivers", StringComparison.OrdinalIgnoreCase) == true)
-            {
-                _logger.LogWarning("Trying Vorbis comments for KEY tag...");
-            }
             
             // Try multiple possible KEY field names in Vorbis comments (including custom AB: prefixed tags)
             var possibleKeyFields = new[] { "KEY", "TKEY", "MUSICAL_KEY", "KEY_SIGNATURE", "INITIAL_KEY", "INITIALKEY", "AB:KEY", "AB KEY", "AB_KEY" };
@@ -471,16 +325,50 @@ public class MusicTagService(
                 }
             }
             
-            if (file.Name?.Contains("Shivers", StringComparison.OrdinalIgnoreCase) == true)
-            {
-                _logger.LogWarning("No KEY found in any Vorbis comment fields: [{Fields}]", string.Join(", ", possibleKeyFields));
-            }
+
             
             return null;
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Error extracting key tag");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Extracts custom tags by trying different extraction methods based on tag name format.
+    /// </summary>
+    /// <param name="file">The TagLib file.</param>
+    /// <param name="tagName">The name of the tag to extract.</param>
+    /// <returns>The tag value if found, otherwise null.</returns>
+    private string? ExtractCustomTag(TagLib.File file, string tagName)
+    {
+        try
+        {
+            // First try Vorbis comments (for FLAC files, AB:MOOD tags, etc.)
+            var vorbisResult = ExtractVorbisComment(file, tagName);
+            if (!string.IsNullOrEmpty(vorbisResult))
+            {
+                return vorbisResult;
+            }
+
+            // Only try ID3v2 frames if the tag name is exactly 4 characters (valid ID3v2 frame ID)
+            if (tagName.Length == 4 && tagName.All(char.IsLetterOrDigit))
+            {
+                var id3Result = ExtractId3v2TextFrame(file, tagName);
+                if (!string.IsNullOrEmpty(id3Result))
+                {
+                    return id3Result;
+                }
+            }
+
+            // Finally try generic extraction
+            return ExtractGenericTag(file, tagName);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Error extracting custom tag {TagName}", tagName);
             return null;
         }
     }
@@ -570,9 +458,10 @@ public class MusicTagService(
     /// <returns>A task representing the asynchronous operation.</returns>
     public async Task RemoveTagsFromAllAudioItemsAsync(string tagsToRemove, CancellationToken cancellationToken)
     {
+        SemaphoreSlim? semaphore = null;
         try
         {
-            _logger.LogInformation("Starting bulk tag removal for tags: {TagsToRemove}", tagsToRemove);
+            _logger.LogInformation("Starting bulk tag removal for tags: {TagsToRemove}. This can take a while if you have a large music library.", tagsToRemove);
 
             // Create query for all audio items
             var query = new InternalItemsQuery(null) // null user means system-wide query
@@ -593,28 +482,104 @@ public class MusicTagService(
             }
 
             var processedCount = 0;
-            foreach (var audioItem in audioItems)
+            var batchSize = Math.Min(Environment.ProcessorCount * 2, 10); // Limit concurrent operations
+            semaphore = new SemaphoreSlim(batchSize, batchSize);
+            var progressLock = new object();
+            var itemsToUpdate = new System.Collections.Concurrent.ConcurrentBag<Audio>();
+
+            _logger.LogInformation("Processing tag removal with {BatchSize} concurrent operations", batchSize);
+
+            var processingTasks = audioItems.Select(async audioItem =>
             {
+                // Check cancellation before acquiring semaphore to avoid unnecessary waiting
                 if (cancellationToken.IsCancellationRequested)
                 {
-                    _logger.LogInformation("Tag removal cancelled by user");
-                    break;
+                    return;
                 }
 
-                await RemoveTagsAsync(audioItem, tagsToRemove, cancellationToken).ConfigureAwait(false);
-                processedCount++;
-
-                if (processedCount % 100 == 0)
+                var semaphoreAcquired = false;
+                try
                 {
-                    _logger.LogInformation("Processed {Count} audio items for tag removal", processedCount);
+                    await semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
+                    semaphoreAcquired = true;
+                    
+                    // Double-check cancellation after acquiring semaphore
+                    if (cancellationToken.IsCancellationRequested)
+                    {
+                        return;
+                    }
+
+                    var wasModified = RemoveTagsInternal(audioItem, tagsToRemove);
+                    if (wasModified)
+                    {
+                        itemsToUpdate.Add(audioItem);
+                    }
+                    
+                    // Thread-safe progress reporting
+                    lock (progressLock)
+                    {
+                        processedCount++;
+                        if (processedCount % 100 == 0)
+                        {
+                            _logger.LogInformation("Processed {Count}/{Total} audio items for tag removal ({Percentage:F1}%)", 
+                                processedCount, audioItems.Count, 
+                                (processedCount * 100.0) / audioItems.Count);
+                        }
+                    }
                 }
+                catch (OperationCanceledException)
+                {
+                    // Expected exception when cancellation is requested
+                    _logger.LogDebug("Tag removal cancelled for audio item {Name}", audioItem.Name);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error removing tags from audio item {Name}", audioItem.Name);
+                }
+                finally
+                {
+                    if (semaphoreAcquired)
+                    {
+                        semaphore.Release();
+                    }
+                }
+            });
+
+            await Task.WhenAll(processingTasks).ConfigureAwait(false);
+
+            // Batch update all modified items
+            if (itemsToUpdate.Count > 0)
+            {
+                _logger.LogInformation("Performing batch database update for {Count} modified items", itemsToUpdate.Count);
+                
+                var updateTasks = itemsToUpdate.Select(async item =>
+                {
+                    try
+                    {
+                        await _libraryManager.UpdateItemAsync(item, item, ItemUpdateType.MetadataEdit, cancellationToken).ConfigureAwait(false);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Error updating item {Name}", item.Name);
+                    }
+                });
+
+                await Task.WhenAll(updateTasks).ConfigureAwait(false);
+                _logger.LogInformation("Completed batch database update for tag removal");
             }
 
-            _logger.LogInformation("Completed bulk tag removal. Processed {Count} audio items", processedCount);
+            _logger.LogInformation("Completed bulk tag removal. Processed {Count} audio items, updated {UpdatedCount} items", 
+                processedCount, itemsToUpdate.Count);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error during bulk tag removal");
+            throw;
+        }
+        finally
+        {
+            // Ensure proper disposal of SemaphoreSlim to prevent memory leaks
+            semaphore?.Dispose();
         }
     }
 
@@ -625,9 +590,10 @@ public class MusicTagService(
     /// <returns>A task representing the asynchronous operation.</returns>
     public async Task ProcessAllAudioItemsAsync(CancellationToken cancellationToken)
     {
+        SemaphoreSlim? semaphore = null;
         try
         {
-            _logger.LogInformation("Starting bulk ID3 tag processing for all audio items");
+            _logger.LogInformation("Starting bulk ID3 tag processing for all audio items. This can take a while if you have a large music library.");
 
             // Create query for all audio items
             var query = new InternalItemsQuery(null) // null user means system-wide query
@@ -648,45 +614,266 @@ public class MusicTagService(
             }
 
             var processedCount = 0;
-            foreach (var audioItem in audioItems)
+            var batchSize = Math.Min(Environment.ProcessorCount * 2, 10); // Limit concurrent operations
+            semaphore = new SemaphoreSlim(batchSize, batchSize);
+            var progressLock = new object();
+            var itemsToUpdate = new System.Collections.Concurrent.ConcurrentBag<Audio>();
+
+            _logger.LogInformation("Processing with {BatchSize} concurrent operations", batchSize);
+
+            var processingTasks = audioItems.Select(async audioItem =>
             {
+                // Check cancellation before acquiring semaphore to avoid unnecessary waiting
                 if (cancellationToken.IsCancellationRequested)
                 {
-                    _logger.LogInformation("Music tag processing cancelled by user");
-                    break;
+                    return;
                 }
 
-                await ProcessAudioItemAsync(audioItem, cancellationToken).ConfigureAwait(false);
-                processedCount++;
-
-                if (processedCount % 100 == 0)
+                var semaphoreAcquired = false;
+                try
                 {
-                    _logger.LogInformation("Processed {Count} audio items", processedCount);
+                    await semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
+                    semaphoreAcquired = true;
+                    
+                    // Double-check cancellation after acquiring semaphore
+                    if (cancellationToken.IsCancellationRequested)
+                    {
+                        return;
+                    }
+
+                    var wasUpdated = ProcessAudioItemInternal(audioItem, cancellationToken);
+                    if (wasUpdated)
+                    {
+                        itemsToUpdate.Add(audioItem);
+                    }
+                    
+                    // Thread-safe progress reporting
+                    lock (progressLock)
+                    {
+                        processedCount++;
+                        if (processedCount % 100 == 0)
+                        {
+                            _logger.LogInformation("Processed {Count}/{Total} audio items ({Percentage:F1}%)", 
+                                processedCount, audioItems.Count, 
+                                (processedCount * 100.0) / audioItems.Count);
+                        }
+                    }
                 }
+                catch (OperationCanceledException)
+                {
+                    // Expected exception when cancellation is requested
+                    _logger.LogDebug("Processing cancelled for audio item {Name}", audioItem.Name);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error processing audio item {Name}", audioItem.Name);
+                }
+                finally
+                {
+                    if (semaphoreAcquired)
+                    {
+                        semaphore.Release();
+                    }
+                }
+            });
+
+            await Task.WhenAll(processingTasks).ConfigureAwait(false);
+
+            // Batch update all modified items
+            if (itemsToUpdate.Count > 0)
+            {
+                _logger.LogInformation("Performing batch database update for {Count} modified items", itemsToUpdate.Count);
+                
+                var updateTasks = itemsToUpdate.Select(async item =>
+                {
+                    try
+                    {
+                        await _libraryManager.UpdateItemAsync(item, item, ItemUpdateType.MetadataEdit, cancellationToken).ConfigureAwait(false);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Error updating item {Name}", item.Name);
+                    }
+                });
+
+                await Task.WhenAll(updateTasks).ConfigureAwait(false);
+                _logger.LogInformation("Completed batch database update");
             }
 
-            _logger.LogInformation("Completed bulk ID3 tag processing. Processed {Count} audio items", processedCount);
+            _logger.LogInformation("Completed bulk ID3 tag processing. Processed {Count} audio items, updated {UpdatedCount} items", 
+                processedCount, itemsToUpdate.Count);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error during bulk ID3 tag processing");
+            throw;
+        }
+        finally
+        {
+            // Ensure proper disposal of SemaphoreSlim to prevent memory leaks
+            semaphore?.Dispose();
         }
     }
 
     /// <summary>
-    /// Removes specified tags from an audio item.
+    /// Internal method to process audio item without database updates.
+    /// </summary>
+    /// <param name="audioItem">The audio item to process.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>True if the item was modified and needs database update, false otherwise.</returns>
+    private bool ProcessAudioItemInternal(Audio audioItem, CancellationToken cancellationToken)
+    {
+        TagLib.File? file = null;
+        try
+        {
+            if (audioItem == null || string.IsNullOrEmpty(audioItem.Path))
+            {
+                _logger.LogWarning("Audio item or path is null, skipping tag extraction");
+                return false;
+            }
+
+            if (!File.Exists(audioItem.Path))
+            {
+                _logger.LogWarning("Audio file does not exist: {Path}", audioItem.Path);
+                return false;
+            }
+
+            _logger.LogDebug("Processing ID3 tags for: {Name} ({Path})", audioItem.Name, audioItem.Path);
+
+            file = TagLib.File.Create(audioItem.Path);
+            if (file == null)
+            {
+                _logger.LogWarning("Could not create TagLib file for: {Path}", audioItem.Path);
+                return false;
+            }
+
+            var extractedTags = new List<string>();
+
+            // Extract all configured tags
+            if (!string.IsNullOrWhiteSpace(_configuration.TagNames))
+            {
+                var tags = ExtractConfiguredTags(file);
+                extractedTags.AddRange(tags);
+            }
+
+            // Add extracted tags to the audio item (without database update)
+            if (extractedTags.Count > 0)
+            {
+                var wasModified = AddTagsToAudioItemInternal(audioItem, extractedTags);
+                
+                if (wasModified)
+                {
+                    _logger.LogDebug("Extracted {Count} tags from {Name}: {Tags}",
+                        extractedTags.Count, audioItem.Name, string.Join(", ", extractedTags));
+                }
+                
+                return wasModified;
+            }
+            
+            return false;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error processing ID3 tags for {Name}", audioItem?.Name ?? "unknown");
+            return false;
+        }
+        finally
+        {
+            // Ensure proper disposal of TagLib.File resources
+            file?.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Adds tags to the audio item without database update.
+    /// </summary>
+    /// <param name="audioItem">The audio item.</param>
+    /// <param name="tags">The tags to add.</param>
+    /// <returns>True if the item was modified, false otherwise.</returns>
+    private bool AddTagsToAudioItemInternal(Audio audioItem, List<string> tags)
+    {
+        try
+        {
+            var existingTags = audioItem.Tags?.ToList() ?? [];
+            var newTags = new List<string>();
+
+            foreach (var tag in tags)
+            {
+                // Extract tag name (everything before the last colon, which is the separator)
+                var lastColonIndex = tag.LastIndexOf(':');
+                if (lastColonIndex == -1)
+                {
+                    // No colon found, skip this tag
+                    _logger.LogWarning("Invalid tag format (no colon separator): {Tag}", tag);
+                    continue;
+                }
+                
+                var tagName = tag[..lastColonIndex];
+                
+                // Check if a tag with the same name already exists
+                var existingTagWithSameName = existingTags.FirstOrDefault(t => 
+                {
+                    var existingLastColonIndex = t.LastIndexOf(':');
+                    if (existingLastColonIndex == -1) return false;
+                    var existingTagName = t[..existingLastColonIndex];
+                    return existingTagName.Equals(tagName, StringComparison.OrdinalIgnoreCase);
+                });
+                
+                if (existingTagWithSameName == null)
+                {
+                    // Tag name doesn't exist, add it
+                    newTags.Add(tag);
+                }
+                else if (_configuration.OverwriteExistingTags)
+                {
+                    // Overwrite is enabled, remove existing tag and add new one
+                    existingTags.RemoveAll(t => 
+                    {
+                        var existingLastColonIndex = t.LastIndexOf(':');
+                        if (existingLastColonIndex == -1) return false;
+                        var existingTagName = t[..existingLastColonIndex];
+                        return existingTagName.Equals(tagName, StringComparison.OrdinalIgnoreCase);
+                    });
+                    newTags.Add(tag);
+                }
+                else
+                {
+                    // Overwrite is disabled and tag name exists, skip it
+                    _logger.LogDebug("Skipping tag '{Tag}' for {Name} (overwrite disabled)", tag, audioItem.Name);
+                }
+            }
+
+            if (newTags.Count > 0)
+            {
+                existingTags.AddRange(newTags);
+                audioItem.Tags = [..existingTags];
+                
+                _logger.LogDebug("Added {Count} new tags to {Name}", newTags.Count, audioItem.Name);
+                return true; // Item was modified
+            }
+            
+            return false; // No modifications made
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error adding tags to audio item {Name}", audioItem.Name);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Removes specified tags from an audio item without database update.
     /// </summary>
     /// <param name="audioItem">The audio item to process.</param>
     /// <param name="tagsToRemove">Comma-separated list of tag names to remove.</param>
-    /// <param name="cancellationToken">The cancellation token.</param>
-    /// <returns>A task representing the asynchronous operation.</returns>
-    private async Task RemoveTagsAsync(Audio audioItem, string tagsToRemove, CancellationToken cancellationToken)
+    /// <returns>True if the item was modified, false otherwise.</returns>
+    private bool RemoveTagsInternal(Audio audioItem, string tagsToRemove)
     {
         try
         {
             if (string.IsNullOrWhiteSpace(tagsToRemove))
             {
-                return; // No tags to remove
+                return false; // No tags to remove
             }
 
             var existingTags = audioItem.Tags?.ToList() ?? [];
@@ -698,7 +885,7 @@ public class MusicTagService(
 
             if (tagNamesToRemove.Count == 0)
             {
-                return; // No valid tag names to remove
+                return false; // No valid tag names to remove
             }
 
             var removedCount = 0;
@@ -735,16 +922,32 @@ public class MusicTagService(
             if (removedCount > 0)
             {
                 audioItem.Tags = [..tagsToKeep];
-                
-                // Update the item in the library
-                await _libraryManager.UpdateItemAsync(audioItem, audioItem, ItemUpdateType.MetadataEdit, cancellationToken).ConfigureAwait(false);
-                
                 _logger.LogDebug("Removed {Count} tags from {Name}", removedCount, audioItem.Name);
+                return true; // Item was modified
             }
+            
+            return false; // No modifications made
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error removing tags from audio item {Name}", audioItem.Name);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Removes specified tags from an audio item (backwards compatibility method).
+    /// </summary>
+    /// <param name="audioItem">The audio item to process.</param>
+    /// <param name="tagsToRemove">Comma-separated list of tag names to remove.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A task representing the asynchronous operation.</returns>
+    private async Task RemoveTagsAsync(Audio audioItem, string tagsToRemove, CancellationToken cancellationToken)
+    {
+        var wasModified = RemoveTagsInternal(audioItem, tagsToRemove);
+        if (wasModified)
+        {
+            await _libraryManager.UpdateItemAsync(audioItem, audioItem, ItemUpdateType.MetadataEdit, cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -761,51 +964,7 @@ public class MusicTagService(
             // Check if the file supports Vorbis comments (FLAC, OGG, etc.)
             if (file.GetTag(TagLib.TagTypes.Xiph) is TagLib.Ogg.XiphComment vorbisTag)
             {
-                // Enhanced debugging for Shivers to show all available Vorbis fields
-                if (file.Name?.Contains("Shivers", StringComparison.OrdinalIgnoreCase) == true)
-                {
-                    _logger.LogWarning("=== SHIVERS VORBIS COMMENT DEBUGGING ===");
-                    _logger.LogWarning("Looking for tag: '{TagName}'", tagName);
-                    
-                    // Show all available Vorbis comment field names
-                    try
-                    {
-                        var fieldCount = vorbisTag.FieldCount;
-                        _logger.LogWarning("Total Vorbis comment fields: {Count}", fieldCount);
-                        
-                        // Try to enumerate all available fields (this is a bit of a hack since XiphComment doesn't expose field names directly)
-                        var allFieldNames = new List<string>();
-                        
-                        // Test common field names to see what's available
-                        var commonFields = new[] { 
-                            "TITLE", "ARTIST", "ALBUM", "DATE", "GENRE", "COMPOSER", "PERFORMER",
-                            "KEY", "TKEY", "MUSICAL_KEY", "KEY_SIGNATURE", "INITIAL_KEY", "INITIALKEY",
-                            "AB:KEY", "AB KEY", "AB_KEY", "AB:GENRE", "AB:MOOD", "AB GENRE", "AB MOOD",
-                            "BPM", "TEMPO", "DISCNUMBER", "TRACKNUMBER"
-                        };
-                        
-                        foreach (var testField in commonFields)
-                        {
-                            var testValues = vorbisTag.GetField(testField);
-                            if (testValues != null && testValues.Length > 0 && testValues.Any(v => !string.IsNullOrEmpty(v)))
-                            {
-                                allFieldNames.Add(testField);
-                                _logger.LogWarning("Available field '{Field}' with values: [{Values}]", testField, string.Join(", ", testValues));
-                            }
-                        }
-                        
-                        if (allFieldNames.Count == 0)
-                        {
-                            _logger.LogWarning("No common Vorbis comment fields found - file might use unusual field names");
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, "Error enumerating Vorbis comment fields");
-                    }
-                    
-                    _logger.LogWarning("=== END SHIVERS VORBIS COMMENT DEBUGGING ===");
-                }
+
                 
                 var values = new List<string>();
                 
@@ -873,38 +1032,7 @@ public class MusicTagService(
                     var uniqueFrameIds = frameIds.Distinct().OrderBy(x => x).ToList();
                     _logger.LogDebug("Available ID3v2 frames: [{FrameIds}]", string.Join(", ", uniqueFrameIds));
                     
-                    // Enhanced debugging for Shivers track
-                    if (file.Name?.Contains("Shivers", StringComparison.OrdinalIgnoreCase) == true)
-                    {
-                        _logger.LogWarning("=== SHIVERS FRAME DETAILS ===");
-                        foreach (var frame in id3v2Tag)
-                        {
-                            if (frame != null)
-                            {
-                                _logger.LogWarning("Frame ID: {FrameId}, Type: {FrameType}", 
-                                    frame.FrameId, frame.GetType().Name);
-                                
-                                // If it's a TXXX frame, show the description
-                                if (frame is TagLib.Id3v2.UserTextInformationFrame userTextFrame)
-                                {
-                                    _logger.LogWarning("TXXX frame description: '{Description}'", userTextFrame.Description);
-                                    foreach (var text in userTextFrame.Text)
-                                    {
-                                        _logger.LogWarning("TXXX frame value: '{Value}'", text);
-                                    }
-                                }
-                                // If it's a text frame, show the text
-                                else if (frame is TagLib.Id3v2.TextInformationFrame textFrame)
-                                {
-                                    foreach (var text in textFrame.Text)
-                                    {
-                                        _logger.LogWarning("Text frame value: '{Value}'", text);
-                                    }
-                                }
-                            }
-                        }
-                        _logger.LogWarning("=== END SHIVERS FRAME DETAILS ===");
-                    }
+
                 }
                 else
                 {
