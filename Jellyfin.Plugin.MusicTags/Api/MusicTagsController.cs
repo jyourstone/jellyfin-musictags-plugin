@@ -208,10 +208,10 @@ public class MusicTagsController(
                 return Conflict(runningResult);
             }
 
-            _logger.LogInformation("Manual tag removal requested for tags: {TagsToRemove}", request.TagsToRemove);
-
             try
             {
+                _logger.LogInformation("Manual tag removal requested for tags: {TagsToRemove}", request.TagsToRemove);
+
                 // Create the MusicTagService with the current configuration
                 var serviceLogger = _loggerFactory.CreateLogger<MusicTagService>();
                 var configuration = Plugin.Instance?.Configuration ?? new PluginConfiguration();
