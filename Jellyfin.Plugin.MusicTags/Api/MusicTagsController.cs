@@ -28,8 +28,8 @@ public class MusicTagsController(
     private readonly ITaskManager _taskManager = taskManager;
     private readonly ILoggerFactory _loggerFactory = loggerFactory;
     
-    // Static flag to track if tag removal is currently in progress
-    private static volatile bool _isTagRemovalInProgress = false;
+    // Semaphore to handle tag removal concurrency
+    private static readonly SemaphoreSlim _tagRemovalSemaphore = new(1, 1);
 
     /// <summary>
     /// Gets the plugin status and statistics.
@@ -55,8 +55,14 @@ public class MusicTagsController(
                 TagNames = configuration.TagNames,
                 OverwriteExistingTags = configuration.OverwriteExistingTags,
                 IsTaskRunning = isTaskRunning,
-                IsTagRemovalInProgress = _isTagRemovalInProgress
+                IsTagRemovalInProgress = !_tagRemovalSemaphore.Wait(0) // Try to acquire without waiting
             };
+            
+            // If we successfully acquired the semaphore, release it immediately
+            if (!status.IsTagRemovalInProgress)
+            {
+                _tagRemovalSemaphore.Release();
+            }
 
             return Ok(status);
         }
@@ -96,7 +102,7 @@ public class MusicTagsController(
                 }
 
                 // Check if tag removal is already in progress
-                if (_isTagRemovalInProgress)
+                if (!_tagRemovalSemaphore.Wait(0)) // Try to acquire without waiting
                 {
                     _logger.LogWarning("Tag removal is already in progress, cannot start processing task");
                     var runningResult = new ProcessingResult
@@ -108,6 +114,9 @@ public class MusicTagsController(
 
                     return Conflict(runningResult);
                 }
+                
+                // Release the semaphore since we're not doing tag removal
+                _tagRemovalSemaphore.Release();
 
                 _logger.LogInformation("Triggering MusicTags processing task");
                 _taskManager.Execute(refreshTask, new TaskOptions());
@@ -185,8 +194,8 @@ public class MusicTagsController(
                 return Conflict(runningResult);
             }
 
-            // Check if tag removal is already in progress
-            if (_isTagRemovalInProgress)
+            // Try to acquire the semaphore to start tag removal
+            if (!await _tagRemovalSemaphore.WaitAsync(0, cancellationToken))
             {
                 _logger.LogWarning("Tag removal is already in progress, cannot start another removal operation");
                 var runningResult = new ProcessingResult
@@ -200,9 +209,6 @@ public class MusicTagsController(
             }
 
             _logger.LogInformation("Manual tag removal requested for tags: {TagsToRemove}", request.TagsToRemove);
-
-            // Set flag to indicate tag removal is in progress
-            _isTagRemovalInProgress = true;
 
             try
             {
@@ -225,8 +231,8 @@ public class MusicTagsController(
             }
             finally
             {
-                // Always reset the flag when the operation completes (success or failure)
-                _isTagRemovalInProgress = false;
+                // Always release the semaphore when the operation completes (success or failure)
+                _tagRemovalSemaphore.Release();
             }
         }
         catch (Exception ex)

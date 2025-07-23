@@ -88,6 +88,29 @@
 
             var statusCheckInterval = null;
 
+            function handleTaskConflictError(error, button, originalText) {
+                button.disabled = false;
+                button.querySelector('span').textContent = originalText;
+                console.error('API Error:', error);
+                
+                // Check if it's a 400 or 409 error (task already running)
+                if (error.status === 400 || error.status === 409) {
+                    // Parse the error message from the response
+                    error.text().then(function(errorText) {
+                        try {
+                            var errorData = JSON.parse(errorText);
+                            Dashboard.alert(errorData.Message || 'Task is already running. Check server logs for progress.');
+                        } catch (parseError) {
+                            Dashboard.alert('Task is already running. Check server logs for progress.');
+                        }
+                    }).catch(function() {
+                        Dashboard.alert('Task is already running. Check server logs for progress.');
+                    });
+                } else {
+                    Dashboard.alert('Error processing request. Check server logs for details.');
+                }
+            }
+
             function checkTaskStatus() {
                 ApiClient.ajax({
                     type: 'GET',
@@ -95,10 +118,6 @@
                 }).then(function(response) {
                     var processButton = document.querySelector('#processTagsButton');
                     var removeButton = document.querySelector('#removeTagsButton');
-                    var processDescription = document.querySelector('#processTagsDescription');
-                    var removeDescription = document.querySelector('#removeTagsDescription');
-                    
-
                     
                     if (response.IsTaskRunning || response.IsTagRemovalInProgress) {
                         // Task or tag removal is running, keep buttons disabled
@@ -208,26 +227,7 @@
                         document.querySelector('#TagsToRemove').value = '';
                         Dashboard.alert('Tag removal started, this can take a while if you have a large music library.');
                     }).catch(function(error) {
-                        button.disabled = false;
-                        span.textContent = originalText;
-                        console.error('API Error:', error);
-                        
-                        // Check if it's a 400 or 409 error (task already running)
-                        if (error.status === 400 || error.status === 409) {
-                            // Parse the error message from the response
-                            error.text().then(function(errorText) {
-                                try {
-                                    var errorData = JSON.parse(errorText);
-                                    Dashboard.alert(errorData.Message || 'Task is already running. Check server logs for progress.');
-                                } catch (parseError) {
-                                    Dashboard.alert('Task is already running. Check server logs for progress.');
-                                }
-                            }).catch(function() {
-                                Dashboard.alert('Task is already running. Check server logs for progress.');
-                            });
-                        } else {
-                            Dashboard.alert('Error removing tags. Check server logs for details.');
-                        }
+                        handleTaskConflictError(error, button, originalText);
                     });
                 });
 
@@ -256,26 +256,7 @@
                         // Start checking task status
                         setTimeout(checkTaskStatus, 1000); // Check after 1 second
                     }).catch(function(error) {
-                        button.disabled = false;
-                        span.textContent = originalText;
-                        console.error('API Error:', error);
-                        
-                        // Check if it's a 400 or 409 error (task already running)
-                        if (error.status === 400 || error.status === 409) {
-                            // Parse the error message from the response
-                            error.text().then(function(errorText) {
-                                try {
-                                    var errorData = JSON.parse(errorText);
-                                    Dashboard.alert(errorData.Message || 'Task is already running. Check server logs for progress.');
-                                } catch (parseError) {
-                                    Dashboard.alert('Task is already running. Check server logs for progress.');
-                                }
-                            }).catch(function() {
-                                Dashboard.alert('Task is already running. Check server logs for progress.');
-                            });
-                        } else {
-                            Dashboard.alert('Error processing tags. Check server logs for details.');
-                        }
+                        handleTaskConflictError(error, button, originalText);
                     });
                 });
         </script>
