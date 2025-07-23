@@ -27,6 +27,9 @@ public class MusicTagsController(
     private readonly ILibraryManager _libraryManager = libraryManager;
     private readonly ITaskManager _taskManager = taskManager;
     private readonly ILoggerFactory _loggerFactory = loggerFactory;
+    
+    // Semaphore to handle tag removal concurrency
+    private static readonly SemaphoreSlim _tagRemovalSemaphore = new(1, 1);
 
     /// <summary>
     /// Gets the plugin status and statistics.
@@ -37,8 +40,6 @@ public class MusicTagsController(
     {
         try
         {
-            var audioCount = 0; // TODO: Implement proper audio item counting
-
             var configuration = Plugin.Instance?.Configuration ?? new PluginConfiguration();
             
             // Check if the MusicTags processing task is currently running
@@ -51,10 +52,10 @@ public class MusicTagsController(
 
             var status = new PluginStatus
             {
-                TotalAudioItems = audioCount,
                 TagNames = configuration.TagNames,
                 OverwriteExistingTags = configuration.OverwriteExistingTags,
-                IsTaskRunning = isTaskRunning
+                IsTaskRunning = isTaskRunning,
+                IsTagRemovalInProgress = _tagRemovalSemaphore.CurrentCount == 0
             };
 
             return Ok(status);
@@ -87,7 +88,21 @@ public class MusicTagsController(
                     var runningResult = new ProcessingResult
                     {
                         Success = false,
-                        Message = "Music tag processing is already running. Please wait for the current scan to complete before starting a new one.",
+                        Message = "Music tag processing is already running. Check server logs for progress.",
+                        Timestamp = DateTime.UtcNow
+                    };
+
+                    return Conflict(runningResult);
+                }
+
+                // Check if tag removal is already in progress
+                if (_tagRemovalSemaphore.CurrentCount == 0)
+                {
+                    _logger.LogWarning("Tag removal is already in progress, cannot start processing task");
+                    var runningResult = new ProcessingResult
+                    {
+                        Success = false,
+                        Message = "Tag removal is already in progress. Check server logs for progress.",
                         Timestamp = DateTime.UtcNow
                     };
 
@@ -100,7 +115,7 @@ public class MusicTagsController(
                 var successResult = new ProcessingResult
                 {
                     Success = true,
-                    Message = "Music tag processing task has been triggered. Processing will begin shortly.",
+                    Message = "Tag processing started, this can take a while if you have a large music library.",
                     Timestamp = DateTime.UtcNow
                 };
 
@@ -155,24 +170,62 @@ public class MusicTagsController(
                 });
             }
 
-            _logger.LogInformation("Manual tag removal requested for tags: {TagsToRemove}", request.TagsToRemove);
-
-            // Create the MusicTagService with the current configuration
-            var serviceLogger = _loggerFactory.CreateLogger<MusicTagService>();
-            var configuration = Plugin.Instance?.Configuration ?? new PluginConfiguration();
-            var musicTagService = new MusicTagService(serviceLogger, _libraryManager, configuration);
-
-            // Remove the specified tags from all audio items
-            await musicTagService.RemoveTagsFromAllAudioItemsAsync(request.TagsToRemove, cancellationToken).ConfigureAwait(false);
-            
-            var result = new ProcessingResult
+            // Check if the MusicTags processing task is already running
+            var refreshTask = _taskManager.ScheduledTasks.FirstOrDefault(t => t.ScheduledTask.Key == "ProcessMusicTags");
+            if (refreshTask != null && refreshTask.State == TaskState.Running)
             {
-                Success = true,
-                Message = $"Successfully removed tags: {request.TagsToRemove}",
-                Timestamp = DateTime.UtcNow
-            };
+                _logger.LogWarning("MusicTags processing task is already running, cannot start tag removal");
+                var runningResult = new ProcessingResult
+                {
+                    Success = false,
+                    Message = "Music tag processing is already running. Check server logs for progress.",
+                    Timestamp = DateTime.UtcNow
+                };
 
-            return Ok(result);
+                return Conflict(runningResult);
+            }
+
+            // Try to acquire the semaphore to start tag removal
+            if (!await _tagRemovalSemaphore.WaitAsync(0, cancellationToken))
+            {
+                _logger.LogWarning("Tag removal is already in progress, cannot start another removal operation");
+                var runningResult = new ProcessingResult
+                {
+                    Success = false,
+                    Message = "Tag removal is already in progress. Check server logs for progress.",
+                    Timestamp = DateTime.UtcNow
+                };
+
+                return Conflict(runningResult);
+            }
+
+            try
+            {
+                
+                _logger.LogInformation("Manual tag removal requested for tags: {TagsToRemove}", request.TagsToRemove);
+
+                // Create the MusicTagService with the current configuration
+                var serviceLogger = _loggerFactory.CreateLogger<MusicTagService>();
+                var configuration = Plugin.Instance?.Configuration ?? new PluginConfiguration();
+                var musicTagService = new MusicTagService(serviceLogger, _libraryManager, configuration);
+
+                // Remove the specified tags from all audio items
+                await musicTagService.RemoveTagsFromAllAudioItemsAsync(request.TagsToRemove, cancellationToken).ConfigureAwait(false);
+                
+                var result = new ProcessingResult
+                {
+                    Success = true,
+                    Message = $"Successfully removed tags: {request.TagsToRemove}",
+                    Timestamp = DateTime.UtcNow
+                };
+
+                return Ok(result);
+            }
+            finally
+            {
+                // Always release the semaphore when the operation completes (success or failure)
+                _tagRemovalSemaphore.Release();
+            }
         }
         catch (Exception ex)
         {
@@ -209,11 +262,6 @@ public class RemoveTagsRequest
 public class PluginStatus
 {
     /// <summary>
-    /// Gets or sets the total number of audio items in the library.
-    /// </summary>
-    public int TotalAudioItems { get; set; }
-
-    /// <summary>
     /// Gets or sets the comma-separated list of tag names to extract.
     /// </summary>
     public string TagNames { get; set; } = string.Empty;
@@ -227,6 +275,11 @@ public class PluginStatus
     /// Gets or sets a value indicating whether the MusicTags processing task is currently running.
     /// </summary>
     public bool IsTaskRunning { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether tag removal is currently in progress.
+    /// </summary>
+    public bool IsTagRemovalInProgress { get; set; }
 }
 
 /// <summary>

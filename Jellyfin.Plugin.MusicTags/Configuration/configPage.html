@@ -88,6 +88,29 @@
 
             var statusCheckInterval = null;
 
+            function handleTaskConflictError(error, button, originalText) {
+                button.disabled = false;
+                button.querySelector('span').textContent = originalText;
+                console.error('API Error:', error);
+                
+                // Check if it's a 400 or 409 error (task already running)
+                if (error.status === 400 || error.status === 409) {
+                    // Parse the error message from the response
+                    error.text().then(function(errorText) {
+                        try {
+                            var errorData = JSON.parse(errorText);
+                            Dashboard.alert(errorData.Message || 'Task is already running. Check server logs for progress.');
+                        } catch (parseError) {
+                            Dashboard.alert('Task is already running. Check server logs for progress.');
+                        }
+                    }).catch(function() {
+                        Dashboard.alert('Task is already running. Check server logs for progress.');
+                    });
+                } else {
+                    Dashboard.alert('Error processing request. Check server logs for details.');
+                }
+            }
+
             function checkTaskStatus() {
                 ApiClient.ajax({
                     type: 'GET',
@@ -96,23 +119,31 @@
                     var processButton = document.querySelector('#processTagsButton');
                     var removeButton = document.querySelector('#removeTagsButton');
                     
-                    if (response.IsTaskRunning) {
-                        // Task is running, keep buttons disabled
+                    if (response.IsTaskRunning || response.IsTagRemovalInProgress) {
+                        // Task or tag removal is running, keep buttons disabled
                         processButton.disabled = true;
                         removeButton.disabled = true;
-                        processButton.querySelector('span').textContent = 'Processing... (Task Running)';
-                        removeButton.querySelector('span').textContent = 'Remove Tags Now (Task Running)';
+                        
+                        if (response.IsTaskRunning) {
+                            processButton.querySelector('span').textContent = 'Processing... (Task Running)';
+                            removeButton.querySelector('span').textContent = 'Remove Tags Now (Task Running)';
+                        } else if (response.IsTagRemovalInProgress) {
+                            processButton.querySelector('span').textContent = 'Process All Music Tags Now (Tag Removal Running)';
+                            removeButton.querySelector('span').textContent = 'Removing... (Tag Removal Running)';
+                        }
                         
                         // Continue checking status
                         if (!statusCheckInterval) {
                             statusCheckInterval = setInterval(checkTaskStatus, 3000); // Check every 3 seconds
                         }
                     } else {
-                        // Task is not running, enable buttons
+                        // No operations running, enable buttons
                         processButton.disabled = false;
                         removeButton.disabled = false;
                         processButton.querySelector('span').textContent = 'Process All Music Tags Now';
                         removeButton.querySelector('span').textContent = 'Remove Tags Now';
+                        
+
                         
                         // Stop checking status
                         if (statusCheckInterval) {
@@ -196,26 +227,7 @@
                         document.querySelector('#TagsToRemove').value = '';
                         Dashboard.alert('Tag removal started, this can take a while if you have a large music library.');
                     }).catch(function(error) {
-                        button.disabled = false;
-                        span.textContent = originalText;
-                        console.error('API Error:', error);
-                        
-                        // Check if it's a 400 error (task already running)
-                        if (error.status === 400) {
-                            // Parse the error message from the response
-                            error.text().then(function(errorText) {
-                                try {
-                                    var errorData = JSON.parse(errorText);
-                                    Dashboard.alert(errorData.Message || 'Task is already running. Please wait for the current scan to complete.');
-                                } catch (parseError) {
-                                    Dashboard.alert('Task is already running. Please wait for the current scan to complete.');
-                                }
-                            }).catch(function() {
-                                Dashboard.alert('Task is already running. Please wait for the current scan to complete.');
-                            });
-                        } else {
-                            Dashboard.alert('Error removing tags. Check server logs for details.');
-                        }
+                        handleTaskConflictError(error, button, originalText);
                     });
                 });
 
@@ -244,26 +256,7 @@
                         // Start checking task status
                         setTimeout(checkTaskStatus, 1000); // Check after 1 second
                     }).catch(function(error) {
-                        button.disabled = false;
-                        span.textContent = originalText;
-                        console.error('API Error:', error);
-                        
-                        // Check if it's a 400 error (task already running)
-                        if (error.status === 400) {
-                            // Parse the error message from the response
-                            error.text().then(function(errorText) {
-                                try {
-                                    var errorData = JSON.parse(errorText);
-                                    Dashboard.alert(errorData.Message || 'Task is already running. Please wait for the current scan to complete.');
-                                } catch (parseError) {
-                                    Dashboard.alert('Task is already running. Please wait for the current scan to complete.');
-                                }
-                            }).catch(function() {
-                                Dashboard.alert('Task is already running. Please wait for the current scan to complete.');
-                            });
-                        } else {
-                            Dashboard.alert('Error processing tags. Check server logs for details.');
-                        }
+                        handleTaskConflictError(error, button, originalText);
                     });
                 });
         </script>
