@@ -40,11 +40,21 @@ public class MusicTagsController(
             var audioCount = 0; // TODO: Implement proper audio item counting
 
             var configuration = Plugin.Instance?.Configuration ?? new PluginConfiguration();
+            
+            // Check if the MusicTags processing task is currently running
+            var isTaskRunning = false;
+            var refreshTask = _taskManager.ScheduledTasks.FirstOrDefault(t => t.ScheduledTask.Key == "ProcessMusicTags");
+            if (refreshTask != null)
+            {
+                isTaskRunning = refreshTask.State == TaskState.Running;
+            }
+
             var status = new PluginStatus
             {
                 TotalAudioItems = audioCount,
                 TagNames = configuration.TagNames,
-                OverwriteExistingTags = configuration.OverwriteExistingTags
+                OverwriteExistingTags = configuration.OverwriteExistingTags,
+                IsTaskRunning = isTaskRunning
             };
 
             return Ok(status);
@@ -212,6 +222,11 @@ public class PluginStatus
     /// Gets or sets a value indicating whether existing tags should be overwritten.
     /// </summary>
     public bool OverwriteExistingTags { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the MusicTags processing task is currently running.
+    /// </summary>
+    public bool IsTaskRunning { get; set; }
 }
 
 /// <summary>
