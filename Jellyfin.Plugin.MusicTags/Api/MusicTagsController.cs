@@ -30,8 +30,6 @@ public class MusicTagsController(
     
     // Semaphore to handle tag removal concurrency
     private static readonly SemaphoreSlim _tagRemovalSemaphore = new(1, 1);
-    // Boolean flag to track tag removal status (thread-safe)
-    private static volatile bool _isTagRemovalInProgress = false;
 
     /// <summary>
     /// Gets the plugin status and statistics.
@@ -57,7 +55,7 @@ public class MusicTagsController(
                 TagNames = configuration.TagNames,
                 OverwriteExistingTags = configuration.OverwriteExistingTags,
                 IsTaskRunning = isTaskRunning,
-                IsTagRemovalInProgress = _isTagRemovalInProgress
+                IsTagRemovalInProgress = _tagRemovalSemaphore.CurrentCount == 0
             };
 
             return Ok(status);
@@ -98,7 +96,7 @@ public class MusicTagsController(
                 }
 
                 // Check if tag removal is already in progress
-                if (_isTagRemovalInProgress)
+                if (_tagRemovalSemaphore.CurrentCount == 0)
                 {
                     _logger.LogWarning("Tag removal is already in progress, cannot start processing task");
                     var runningResult = new ProcessingResult
@@ -117,7 +115,7 @@ public class MusicTagsController(
                 var successResult = new ProcessingResult
                 {
                     Success = true,
-                    Message = "Music tag processing task has been triggered. Processing will begin shortly.",
+                    Message = "Tag processing started, this can take a while if you have a large music library.",
                     Timestamp = DateTime.UtcNow
                 };
 
@@ -187,20 +185,6 @@ public class MusicTagsController(
                 return Conflict(runningResult);
             }
 
-            // Check if tag removal is already in progress
-            if (_isTagRemovalInProgress)
-            {
-                _logger.LogWarning("Tag removal is already in progress, cannot start another removal operation");
-                var runningResult = new ProcessingResult
-                {
-                    Success = false,
-                    Message = "Tag removal is already in progress. Check server logs for progress.",
-                    Timestamp = DateTime.UtcNow
-                };
-
-                return Conflict(runningResult);
-            }
-
             // Try to acquire the semaphore to start tag removal
             if (!await _tagRemovalSemaphore.WaitAsync(0, cancellationToken))
             {
@@ -217,8 +201,6 @@ public class MusicTagsController(
 
             try
             {
-                // Set the flag to indicate tag removal is in progress
-                _isTagRemovalInProgress = true;
                 
                 _logger.LogInformation("Manual tag removal requested for tags: {TagsToRemove}", request.TagsToRemove);
 
@@ -241,8 +223,7 @@ public class MusicTagsController(
             }
             finally
             {
-                // Always clear the flag and release the semaphore when the operation completes (success or failure)
-                _isTagRemovalInProgress = false;
+                // Always release the semaphore when the operation completes (success or failure)
                 _tagRemovalSemaphore.Release();
             }
         }
