@@ -10,7 +10,7 @@ A plugin for Jellyfin that extracts metadata tags from audio files (ID3v2, Vorbi
 
 This plugin automatically processes your music library to extract embedded tags and makes them available for filtering, and organizing your music collection.
 
-Tested and works with Jellyfin version `10.10.0` and newer.
+Requires Jellyfin version `10.10.0` and newer.
 
 ## ✨ Features
 
