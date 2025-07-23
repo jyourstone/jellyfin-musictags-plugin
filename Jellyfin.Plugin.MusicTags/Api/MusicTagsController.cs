@@ -81,7 +81,7 @@ public class MusicTagsController(
                         Timestamp = DateTime.UtcNow
                     };
 
-                    return BadRequest(runningResult);
+                    return Conflict(runningResult);
                 }
 
                 _logger.LogInformation("Triggering MusicTags processing task");
