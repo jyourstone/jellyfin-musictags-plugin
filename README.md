@@ -2,7 +2,8 @@
 
 <div align="center">
     <p>
-        <img alt="Logo" src="https://raw.githubusercontent.com/jyourstone/jellyfin-musictags-plugin/master/images/logo.jpg" height="350"/>
+        <img alt="Logo" src="https://raw.githubusercontent.com/jyourstone/jellyfin-musictags-plugin/master/images/logo.jpg" height="350"/></br>
+        <a href="https://github.com/jyourstone/jellyfin-musictags-plugin/releases"><img alt="Total GitHub Downloads" src="https://img.shields.io/github/downloads/jyourstone/jellyfin-musictags-plugin/total"/></img></a> <a href="https://github.com/jyourstone/jellyfin-musictags-plugin/issues"><img alt="GitHub Issues or Pull Requests" src="https://img.shields.io/github/issues/jyourstone/jellyfin-musictags-plugin"/></img></a> <a href="https://github.com/jyourstone/jellyfin-musictags-plugin/releases"><img alt="Build and Release" src="https://github.com/jyourstone/jellyfin-musictags-plugin/actions/workflows/release.yml/badge.svg"/></img></a> <a href="https://jellyfin.org/"><img alt="Jellyfin Version" src="https://img.shields.io/badge/Jellyfin-10.10-blue.svg"/></img></a>
     </p>
 </div>
 
