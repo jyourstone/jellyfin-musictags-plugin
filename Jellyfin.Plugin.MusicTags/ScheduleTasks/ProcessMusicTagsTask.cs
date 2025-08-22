@@ -64,7 +64,7 @@ public class ProcessMusicTagsTask(
         [
             new TaskTriggerInfo
             {
-                Type = TaskTriggerInfo.TriggerDaily,
+                Type = TaskTriggerInfoType.DailyTrigger,
                 TimeOfDayTicks = TimeSpan.FromHours(2).Ticks // Run at 2 AM
             }
         ];
