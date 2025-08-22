@@ -59,7 +59,7 @@ jobs:
           cp ./build_output/Jellyfin.Plugin.MusicTags.dll staging/
           cp images/logo.jpg staging/logo.jpg
           cd staging
-          zip -X ../Jellyfin.Plugin.MusicTags${{ github.ref_name }}.zip *
+          zip -X ../Jellyfin.Plugin.MusicTags_${{ github.ref_name }}.zip *
           cd ..
 
       - name: Create Release (auto notes from PRs)
