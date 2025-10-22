@@ -18,7 +18,7 @@
                         <div class="fieldDescription">
                             Comma-separated list of tag names to extract from audio files (e.g., "BPM,KEY"). 
                             These will be added to Jellyfin as tags in the format "TagName:Value" (e.g., "BPM:141").
-                            <br/><br/>
+                            <br/>
                             <strong>Supported formats:</strong>
                             <br/>
                             • <strong>Standard ID3 tags:</strong> BPM, Comment, etc.
@@ -28,6 +28,20 @@
                             • <strong>Vorbis comments (FLAC/OGG):</strong> Any custom field name.
                             <br/>
                             • <strong>Dynamic extraction:</strong> The plugin will attempt to extract any tag name you specify!
+                        </div>
+                    </div>
+
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="TagDelimiters">Tag Value Delimiters</label>
+                        <input id="TagDelimiters" name="TagDelimiters" type="text" is="emby-input" placeholder="e.g., ;|\" />
+                        <div class="fieldDescription">
+                            Custom delimiters for splitting tag values into multiple separate tags.
+                            Enter each delimiter character in sequence (e.g., "/|;\").
+                            <br/>
+                            <strong>Example:</strong> If you have "GENRE:Rock;Metal" and configure ";" as a delimiter, 
+                            it will create two tags: "GENRE:Rock" and "GENRE:Metal".
+                            <br/>
+                            Leave empty to disable delimiter splitting.
                         </div>
                     </div>
 
@@ -48,7 +62,7 @@
                         <input id="TagsToRemove" name="TagsToRemove" type="text" is="emby-input" placeholder="e.g., BPM,AB:GENRE" />
                         <div class="fieldDescription">
                             Comma-separated list of tag names to remove from Jellyfin metadata. Enter just the tag name without the colon and value.
-                            <br/><br/>
+                            <br/>
                             <strong>Examples:</strong>
                             <br/>
                             • To remove "BPM:141" from all items, enter "BPM"
@@ -161,6 +175,7 @@
                     Dashboard.showLoadingMsg();
                     ApiClient.getPluginConfiguration(MusicTagsConfig.pluginUniqueId).then(function (config) {
                         document.querySelector('#TagNames').value = config.TagNames || '';
+                        document.querySelector('#TagDelimiters').value = config.TagDelimiters || '';
                         document.querySelector('#OverwriteExistingTags').checked = config.OverwriteExistingTags || false;
                         
                         // Check if the task is currently running
@@ -183,6 +198,7 @@
                     Dashboard.showLoadingMsg();
                     ApiClient.getPluginConfiguration(MusicTagsConfig.pluginUniqueId).then(function (config) {
                         config.TagNames = document.querySelector('#TagNames').value;
+                        config.TagDelimiters = document.querySelector('#TagDelimiters').value;
                         config.OverwriteExistingTags = document.querySelector('#OverwriteExistingTags').checked;
                         ApiClient.updatePluginConfiguration(MusicTagsConfig.pluginUniqueId, config).then(function (result) {
                             Dashboard.processPluginConfigurationUpdateResult(result);

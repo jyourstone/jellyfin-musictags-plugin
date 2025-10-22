@@ -17,6 +17,7 @@ Requires Jellyfin version `10.10.0` or newer. New functionality is only develope
 
 - 🎵 **Multi-Format Support** - Extracts tags from ID3v2, Vorbis comments (FLAC/OGG), and other audio metadata formats
 - 🏷️ **Flexible Tag Extraction** - Configure which specific tags to extract and add to Jellyfin
+- ✂️ **Delimiter Splitting** - Automatically split multi-value tags into separate Jellyfin tags for better filtering
 - 🧹 **Tag Cleanup** - Remove unwanted tags from your Jellyfin library
 - ⚙️ **Configurable Options** - Choose whether to overwrite existing tags or preserve them
 - 🔄 **Automatic Processing** - Scheduled task automatically processes new and updated audio files
@@ -42,11 +43,17 @@ The configuration page allows you to:
    - Supports standard ID3 tags, custom frames, and Vorbis comments
    - Tags are added to Jellyfin in the format "TagName:Value" (e.g., "BPM:141")
 
-2. **Tag Names to Remove**: Remove unwanted tags from your Jellyfin library
+2. **Tag Value Delimiters**: Split multi-value tags into separate tags
+   - Enter delimiter characters (e.g., "/|;\" for slash, pipe, semicolon, and backslash)
+   - Automatically splits tag values containing these delimiters into multiple tags
+   - Perfect for multi-genre tracks, parental controls, and instant mix functionality
+   - Leave empty to disable splitting
+
+3. **Tag Names to Remove**: Remove unwanted tags from your Jellyfin library
    - Comma-separated list of tag names to remove (e.g., "BPM,KEY")
    - Removes ALL instances of these tag names from your library
 
-3. **Processing Options**: Control how tags are processed
+4. **Processing Options**: Control how tags are processed
    - **Overwrite Existing Tags**: Replace existing Jellyfin tags with extracted audio file tags
    - **Manual Processing**: Trigger immediate processing of all audio files
 
@@ -88,7 +95,17 @@ Configure the plugin to extract BPM and KEY information:
 - **Tag Names to Extract**: `BPM,KEY`
 - This will add tags like "BPM:141" and "KEY:D" to your music
 
-### Example 2: Clean Up Old Tags
+### Example 2: Split Multi-Genre Tags
+If your audio files contain multiple genres separated by delimiters:
+- **Tag Names to Extract**: `GENRE`
+- **Tag Value Delimiters**: `/|\`
+- A file with `GENRE=Progressive Rock\Psychedelic Rock` will create two separate tags:
+  - `GENRE:Progressive Rock`
+  - `GENRE:Psychedelic Rock`
+- This enables Jellyfin's instant mix to pull from either genre catalog
+- Perfect for parental control filtering by individual genres
+
+### Example 3: Clean Up Old Tags
 Remove unwanted tags from your library:
 - **Tag Names to Remove**: `BPM`
 - This will remove all instances of these tags from your Jellyfin music library
