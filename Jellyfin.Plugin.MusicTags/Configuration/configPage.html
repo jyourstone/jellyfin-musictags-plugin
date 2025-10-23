@@ -55,6 +55,20 @@
                         <div class="fieldDescription">Replace existing tags with extracted tags</div>
                     </div>
 
+                    <div class="checkboxContainer checkboxContainer-withDescription">
+                        <label class="emby-checkbox-label">
+                            <input id="PropagateTagsToParents" name="PropagateTagsToParents" type="checkbox" is="emby-checkbox" />
+                            <span>Propagate Tags to Parent Albums and Artists</span>
+                        </label>
+                        <div class="fieldDescription">
+                            Automatically apply tags from songs to their parent album and artist items. This enables for example parental control filtering at the album/artist level.
+                            <br/>
+                            <strong>How it works:</strong> After processing all songs, the plugin aggregates all unique tags from each album's songs and applies them to the album. Similarly, all tags from an artist's songs are applied to the artist item.
+                            <br/>
+                            <strong>Example:</strong> If all songs in "Dark Side of the Moon" have <code>GENRE:Progressive Rock</code>, the album will also receive that tag.
+                        </div>
+                    </div>
+
                     <h3 class="sectionTitle">Tag Cleanup</h3>
                     
                     <div class="inputContainer">
@@ -72,12 +86,23 @@
                             • <strong>Warning:</strong> This will remove ALL instances of these tag names from your library
                         </div>
                     </div>
+
+                    <div class="checkboxContainer checkboxContainer-withDescription">
+                        <label class="emby-checkbox-label">
+                            <input id="RemoveFromParents" name="RemoveFromParents" type="checkbox" is="emby-checkbox" />
+                            <span>Also remove from albums and artists</span>
+                        </label>
+                        <div class="fieldDescription">
+                            When enabled, tags will be removed from albums and artists in addition to songs.
+                            Leave unchecked to only remove tags from songs.
+                        </div>
+                    </div>
                     
                     <div class="inputContainer">
                         <button id="removeTagsButton" is="emby-button" type="button" class="raised block emby-button">
                             <span>Remove Tags Now</span>
                         </button>
-                        <div class="fieldDescription">Immediately remove the specified tags from all audio files in your library</div>
+                        <div class="fieldDescription">Immediately remove the specified tags from your library</div>
                     </div>
                     
                     <div class="inputContainer">
@@ -177,6 +202,7 @@
                         document.querySelector('#TagNames').value = config.TagNames || '';
                         document.querySelector('#TagDelimiters').value = config.TagDelimiters || '';
                         document.querySelector('#OverwriteExistingTags').checked = config.OverwriteExistingTags || false;
+                        document.querySelector('#PropagateTagsToParents').checked = config.PropagateTagsToParents || false;
                         
                         // Check if the task is currently running
                         checkTaskStatus();
@@ -200,6 +226,7 @@
                         config.TagNames = document.querySelector('#TagNames').value;
                         config.TagDelimiters = document.querySelector('#TagDelimiters').value;
                         config.OverwriteExistingTags = document.querySelector('#OverwriteExistingTags').checked;
+                        config.PropagateTagsToParents = document.querySelector('#PropagateTagsToParents').checked;
                         ApiClient.updatePluginConfiguration(MusicTagsConfig.pluginUniqueId, config).then(function (result) {
                             Dashboard.processPluginConfigurationUpdateResult(result);
                         });
@@ -219,7 +246,11 @@
                         return;
                     }
                     
-                    if (!confirm('Are you sure you want to remove the tags "' + tagsToRemove + '" from all audio files? This action cannot be undone.')) {
+                    var removeFromParents = document.querySelector('#RemoveFromParents').checked;
+                    var confirmMessage = 'Are you sure you want to remove the tags "' + tagsToRemove + '" from all songs' +
+                        (removeFromParents ? ', albums, and artists' : '') + '? This action cannot be undone.';
+                    
+                    if (!confirm(confirmMessage)) {
                         return;
                     }
                     
@@ -233,7 +264,10 @@
                     ApiClient.ajax({
                         type: 'POST',
                         url: ApiClient.getUrl('MusicTags/RemoveTags'),
-                        data: JSON.stringify({ TagsToRemove: tagsToRemove }),
+                        data: JSON.stringify({ 
+                            TagsToRemove: tagsToRemove,
+                            RemoveFromParents: removeFromParents
+                        }),
                         headers: {
                             'Content-Type': 'application/json'
                         }

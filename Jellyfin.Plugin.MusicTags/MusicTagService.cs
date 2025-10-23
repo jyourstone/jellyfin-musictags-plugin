@@ -432,9 +432,10 @@ public class MusicTagService(
     /// Removes specified tags from all audio items in the library.
     /// </summary>
     /// <param name="tagsToRemove">Comma-separated list of tag names to remove.</param>
+    /// <param name="removeFromParents">Whether to also remove tags from parent albums and artists.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>A task representing the asynchronous operation.</returns>
-    public async Task RemoveTagsFromAllAudioItemsAsync(string tagsToRemove, CancellationToken cancellationToken)
+    public async Task RemoveTagsFromAllAudioItemsAsync(string tagsToRemove, bool removeFromParents, CancellationToken cancellationToken)
     {
         SemaphoreSlim? semaphore = null;
         try
@@ -548,6 +549,13 @@ public class MusicTagService(
 
             _logger.LogInformation("Completed bulk tag removal. Processed {Count} audio items, updated {UpdatedCount} items", 
                 processedCount, itemsToUpdate.Count);
+
+            // Remove from parent albums and artists if requested
+            if (removeFromParents)
+            {
+                await RemoveTagsFromAlbumsAsync(tagsToRemove, cancellationToken).ConfigureAwait(false);
+                await RemoveTagsFromArtistsAsync(tagsToRemove, cancellationToken).ConfigureAwait(false);
+            }
         }
         catch (Exception ex)
         {
@@ -680,6 +688,12 @@ public class MusicTagService(
 
             _logger.LogInformation("Completed bulk ID3 tag processing. Processed {Count} audio items, updated {UpdatedCount} items", 
                 processedCount, itemsToUpdate.Count);
+
+            // Propagate tags to parent albums and artists if configured
+            if (_configuration.PropagateTagsToParents)
+            {
+                await PropagateTagsToParentsAsync(cancellationToken).ConfigureAwait(false);
+            }
         }
         catch (Exception ex)
         {
@@ -839,12 +853,12 @@ public class MusicTagService(
     }
 
     /// <summary>
-    /// Removes specified tags from an audio item without database update.
+    /// Removes specified tags from an item without database update.
     /// </summary>
-    /// <param name="audioItem">The audio item to process.</param>
+    /// <param name="item">The item to process (Audio, MusicAlbum, or MusicArtist).</param>
     /// <param name="tagsToRemove">Comma-separated list of tag names to remove.</param>
     /// <returns>True if the item was modified, false otherwise.</returns>
-    private bool RemoveTagsInternal(Audio audioItem, string tagsToRemove)
+    private bool RemoveTagsInternal(BaseItem item, string tagsToRemove)
     {
         try
         {
@@ -853,7 +867,7 @@ public class MusicTagService(
                 return false; // No tags to remove
             }
 
-            var existingTags = audioItem.Tags?.ToList() ?? [];
+            var existingTags = item.Tags?.ToList() ?? [];
             var tagNamesToRemove = tagsToRemove
                 .Split(',', StringSplitOptions.RemoveEmptyEntries)
                 .Select(name => name.Trim())
@@ -888,7 +902,7 @@ public class MusicTagService(
                 if (shouldRemove)
                 {
                     removedCount++;
-                    _logger.LogDebug("Removing tag '{Tag}' from {Name}", existingTag, audioItem.Name);
+                    _logger.LogDebug("Removing tag '{Tag}' from {Name}", existingTag, item.Name);
                 }
                 else
                 {
@@ -898,8 +912,8 @@ public class MusicTagService(
 
             if (removedCount > 0)
             {
-                audioItem.Tags = [..tagsToKeep];
-                _logger.LogDebug("Removed {Count} tags from {Name}", removedCount, audioItem.Name);
+                item.Tags = [..tagsToKeep];
+                _logger.LogDebug("Removed {Count} tags from {Name}", removedCount, item.Name);
                 return true; // Item was modified
             }
             
@@ -907,7 +921,7 @@ public class MusicTagService(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error removing tags from audio item {Name}", audioItem.Name);
+            _logger.LogError(ex, "Error removing tags from item {Name}", item.Name);
             return false;
         }
     }
@@ -1030,6 +1044,318 @@ public class MusicTagService(
         catch (Exception ex)
         {
             _logger.LogDebug(ex, "Error listing available tags");
+        }
+    }
+
+    /// <summary>
+    /// Propagates tags from songs to their parent albums and artists.
+    /// </summary>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A task representing the asynchronous operation.</returns>
+    private async Task PropagateTagsToParentsAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            _logger.LogInformation("Starting tag propagation to parent albums and artists");
+
+            // First, propagate tags to albums
+            await PropagateTagsToAlbumsAsync(cancellationToken).ConfigureAwait(false);
+
+            // Then, propagate tags to artists
+            await PropagateTagsToArtistsAsync(cancellationToken).ConfigureAwait(false);
+
+            _logger.LogInformation("Completed tag propagation to parent albums and artists");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error during tag propagation to parents");
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Propagates tags from songs to their parent albums.
+    /// </summary>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A task representing the asynchronous operation.</returns>
+    private async Task PropagateTagsToAlbumsAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            _logger.LogInformation("Propagating tags to albums");
+
+            // Get all music albums
+            var albumQuery = new InternalItemsQuery(null)
+            {
+                IncludeItemTypes = [BaseItemKind.MusicAlbum],
+                Recursive = true
+            };
+
+            var albums = _libraryManager.GetItemsResult(albumQuery).Items.ToList();
+            _logger.LogInformation("Found {Count} albums to update", albums.Count);
+
+            var updatedCount = 0;
+
+            foreach (var album in albums)
+            {
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    break;
+                }
+
+                try
+                {
+                    // Get all songs in this album
+                    var songsQuery = new InternalItemsQuery(null)
+                    {
+                        IncludeItemTypes = [BaseItemKind.Audio],
+                        Parent = album,
+                        Recursive = false
+                    };
+
+                    var songs = _libraryManager.GetItemsResult(songsQuery).Items.OfType<Audio>().ToList();
+
+                    if (songs.Count == 0)
+                    {
+                        continue;
+                    }
+
+                    // Aggregate all unique tags from songs
+                    var aggregatedTags = songs
+                        .SelectMany(song => song.Tags ?? [])
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .OrderBy(tag => tag)
+                        .ToArray();
+
+                    // Only update if there are tags to add
+                    if (aggregatedTags.Length > 0)
+                    {
+                        var existingTags = album.Tags?.ToList() ?? [];
+                        var newTags = aggregatedTags.Where(tag => !existingTags.Contains(tag, StringComparer.OrdinalIgnoreCase)).ToList();
+
+                        if (newTags.Count > 0)
+                        {
+                            existingTags.AddRange(newTags);
+                            album.Tags = [.. existingTags];
+
+                            await _libraryManager.UpdateItemAsync(album, album, ItemUpdateType.MetadataEdit, cancellationToken).ConfigureAwait(false);
+                            updatedCount++;
+
+                            _logger.LogDebug("Added {Count} tags to album '{Album}': {Tags}",
+                                newTags.Count, album.Name, string.Join(", ", newTags));
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error propagating tags to album '{Album}'", album.Name);
+                }
+            }
+
+            _logger.LogInformation("Completed tag propagation to albums. Updated {Count}/{Total} albums", updatedCount, albums.Count);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error during tag propagation to albums");
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Propagates tags from songs to their parent artists.
+    /// </summary>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A task representing the asynchronous operation.</returns>
+    private async Task PropagateTagsToArtistsAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            _logger.LogInformation("Propagating tags to artists");
+
+            // Get all music artists
+            var artistQuery = new InternalItemsQuery(null)
+            {
+                IncludeItemTypes = [BaseItemKind.MusicArtist],
+                Recursive = true
+            };
+
+            var artists = _libraryManager.GetItemsResult(artistQuery).Items.ToList();
+            _logger.LogInformation("Found {Count} artists to update", artists.Count);
+
+            var updatedCount = 0;
+
+            foreach (var artist in artists)
+            {
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    break;
+                }
+
+                try
+                {
+                    // Get all songs by this artist
+                    var songsQuery = new InternalItemsQuery(null)
+                    {
+                        IncludeItemTypes = [BaseItemKind.Audio],
+                        ArtistIds = [artist.Id],
+                        Recursive = true
+                    };
+
+                    var songs = _libraryManager.GetItemsResult(songsQuery).Items.OfType<Audio>().ToList();
+
+                    if (songs.Count == 0)
+                    {
+                        continue;
+                    }
+
+                    // Aggregate all unique tags from songs
+                    var aggregatedTags = songs
+                        .SelectMany(song => song.Tags ?? [])
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .OrderBy(tag => tag)
+                        .ToArray();
+
+                    // Only update if there are tags to add
+                    if (aggregatedTags.Length > 0)
+                    {
+                        var existingTags = artist.Tags?.ToList() ?? [];
+                        var newTags = aggregatedTags.Where(tag => !existingTags.Contains(tag, StringComparer.OrdinalIgnoreCase)).ToList();
+
+                        if (newTags.Count > 0)
+                        {
+                            existingTags.AddRange(newTags);
+                            artist.Tags = [.. existingTags];
+
+                            await _libraryManager.UpdateItemAsync(artist, artist, ItemUpdateType.MetadataEdit, cancellationToken).ConfigureAwait(false);
+                            updatedCount++;
+
+                            _logger.LogDebug("Added {Count} tags to artist '{Artist}': {Tags}",
+                                newTags.Count, artist.Name, string.Join(", ", newTags));
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error propagating tags to artist '{Artist}'", artist.Name);
+                }
+            }
+
+            _logger.LogInformation("Completed tag propagation to artists. Updated {Count}/{Total} artists", updatedCount, artists.Count);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error during tag propagation to artists");
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Removes specified tags from all albums in the library.
+    /// </summary>
+    /// <param name="tagsToRemove">Comma-separated list of tag names to remove.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A task representing the asynchronous operation.</returns>
+    private async Task RemoveTagsFromAlbumsAsync(string tagsToRemove, CancellationToken cancellationToken)
+    {
+        try
+        {
+            _logger.LogInformation("Removing tags from albums: {TagsToRemove}", tagsToRemove);
+
+            // Get all music albums
+            var albumQuery = new InternalItemsQuery(null)
+            {
+                IncludeItemTypes = [BaseItemKind.MusicAlbum],
+                Recursive = true
+            };
+
+            var albums = _libraryManager.GetItemsResult(albumQuery).Items.ToList();
+            _logger.LogInformation("Found {Count} albums to process for tag removal", albums.Count);
+
+            var updatedCount = 0;
+
+            foreach (var album in albums)
+            {
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    break;
+                }
+
+                try
+                {
+                    var wasModified = RemoveTagsInternal(album, tagsToRemove);
+                    if (wasModified)
+                    {
+                        await _libraryManager.UpdateItemAsync(album, album, ItemUpdateType.MetadataEdit, cancellationToken).ConfigureAwait(false);
+                        updatedCount++;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error removing tags from album '{Album}'", album.Name);
+                }
+            }
+
+            _logger.LogInformation("Completed tag removal from albums. Updated {Count}/{Total} albums", updatedCount, albums.Count);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error during tag removal from albums");
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Removes specified tags from all artists in the library.
+    /// </summary>
+    /// <param name="tagsToRemove">Comma-separated list of tag names to remove.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A task representing the asynchronous operation.</returns>
+    private async Task RemoveTagsFromArtistsAsync(string tagsToRemove, CancellationToken cancellationToken)
+    {
+        try
+        {
+            _logger.LogInformation("Removing tags from artists: {TagsToRemove}", tagsToRemove);
+
+            // Get all music artists
+            var artistQuery = new InternalItemsQuery(null)
+            {
+                IncludeItemTypes = [BaseItemKind.MusicArtist],
+                Recursive = true
+            };
+
+            var artists = _libraryManager.GetItemsResult(artistQuery).Items.ToList();
+            _logger.LogInformation("Found {Count} artists to process for tag removal", artists.Count);
+
+            var updatedCount = 0;
+
+            foreach (var artist in artists)
+            {
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    break;
+                }
+
+                try
+                {
+                    var wasModified = RemoveTagsInternal(artist, tagsToRemove);
+                    if (wasModified)
+                    {
+                        await _libraryManager.UpdateItemAsync(artist, artist, ItemUpdateType.MetadataEdit, cancellationToken).ConfigureAwait(false);
+                        updatedCount++;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error removing tags from artist '{Artist}'", artist.Name);
+                }
+            }
+
+            _logger.LogInformation("Completed tag removal from artists. Updated {Count}/{Total} artists", updatedCount, artists.Count);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error during tag removal from artists");
+            throw;
         }
     }
 } 
