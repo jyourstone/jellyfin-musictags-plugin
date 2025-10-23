@@ -868,11 +868,14 @@ public class MusicTagService(
             }
 
             var existingTags = item.Tags?.ToList() ?? [];
-            var tagNamesToRemove = tagsToRemove
-                .Split(',', StringSplitOptions.RemoveEmptyEntries)
-                .Select(name => name.Trim())
-                .Where(name => !string.IsNullOrEmpty(name))
-                .ToList();
+            
+            // Use HashSet for O(1) lookups instead of O(n) with Any()
+            var tagNamesToRemove = new HashSet<string>(
+                tagsToRemove
+                    .Split(',', StringSplitOptions.RemoveEmptyEntries)
+                    .Select(name => name.Trim())
+                    .Where(name => !string.IsNullOrEmpty(name)),
+                StringComparer.OrdinalIgnoreCase);
 
             if (tagNamesToRemove.Count == 0)
             {
@@ -895,9 +898,8 @@ public class MusicTagService(
 
                 var existingTagName = existingTag[..lastColonIndex];
                 
-                // Check if this tag should be removed
-                var shouldRemove = tagNamesToRemove.Any(tagToRemove => 
-                    tagToRemove.Equals(existingTagName, StringComparison.OrdinalIgnoreCase));
+                // Check if this tag should be removed (O(1) HashSet lookup)
+                var shouldRemove = tagNamesToRemove.Contains(existingTagName);
 
                 if (shouldRemove)
                 {

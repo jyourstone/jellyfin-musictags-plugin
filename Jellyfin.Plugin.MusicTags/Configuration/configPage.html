@@ -63,9 +63,11 @@
                         <div class="fieldDescription">
                             Automatically apply tags from songs to their parent album and artist items. This enables for example parental control filtering at the album/artist level.
                             <br/>
-                            <strong>How it works:</strong> After processing all songs, the plugin aggregates all unique tags from each album's songs and applies them to the album. Similarly, all tags from an artist's songs are applied to the artist item.
+                            <strong>How it works:</strong> After processing all songs, the plugin aggregates all unique tags from each album's songs and applies them to the album. Similarly, all tags from an artist's songs are applied to the artist item. This adds tags to parents; it does not remove existing parent tags.
                             <br/>
                             <strong>Example:</strong> If all songs in "Dark Side of the Moon" have <code>GENRE:Progressive Rock</code>, the album will also receive that tag.
+                            <br/>
+                            <strong>Note:</strong> To remove tags from parents after removing them from songs, use Tag Cleanup with "Also remove from albums and artists" enabled.
                         </div>
                     </div>
 

@@ -57,7 +57,7 @@ The configuration page allows you to:
 
 4. **Processing Options**: Control how tags are processed
    - **Overwrite Existing Tags**: Replace existing Jellyfin tags with extracted audio file tags
-   - **Propagate Tags to Parent Albums and Artists**: Automatically apply tags from songs to their parent album and artist items
+   - **Propagate Tags to Parent Albums and Artists**: Automatically apply tags from songs to their parent album and artist items. Note: This adds tags to parents; it does not remove existing parent tags. To remove tags from parents, use Tag Cleanup with "Also remove from albums and artists" enabled.
    - **Manual Processing**: Trigger immediate processing of all audio files
 
 ### Supported Tag Formats
@@ -115,6 +115,7 @@ For parental control filtering to work at album/artist level:
 - After processing, songs' genre tags will be applied to their albums and artists
 - You can then use Jellyfin's parental controls to block specific genres for users
 - **Example**: If all songs in an album have `GENRE:Rock`, the album will also get `GENRE:Rock`. If you block Rock for a user, they won't see the album at all.
+- **Note**: Propagation adds tags to parents but doesn't remove them. To clean up parent tags after removing song tags, run Tag Cleanup with "Also remove from albums and artists" enabled.
 
 ### Example 4: Clean Up Old Tags
 Remove unwanted tags from your library:
