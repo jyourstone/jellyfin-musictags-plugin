@@ -1221,19 +1221,24 @@ public class MusicTagService(
                         .OrderBy(tag => tag)
                         .ToArray();
 
-                    // Only update if there are tags to add
+                    // Only update if there are tags to add (using HashSet for O(1) lookups)
                     if (aggregatedTags.Length > 0)
                     {
-                        var existingTags = album.Tags?.ToList() ?? [];
-                        var newTags = aggregatedTags.Where(tag => !existingTags.Contains(tag, StringComparer.OrdinalIgnoreCase)).ToList();
+                        var existingSet = new HashSet<string>(album.Tags ?? [], StringComparer.OrdinalIgnoreCase);
+                        var initialCount = existingSet.Count;
 
-                        if (newTags.Count > 0)
+                        // Add all aggregated tags (HashSet handles duplicates automatically)
+                        foreach (var tag in aggregatedTags)
                         {
-                            existingTags.AddRange(newTags);
-                            album.Tags = [.. existingTags];
+                            existingSet.Add(tag);
+                        }
 
-                            _logger.LogDebug("Added {Count} tags to album '{Album}': {Tags}",
-                                newTags.Count, album.Name, string.Join(", ", newTags));
+                        if (existingSet.Count > initialCount) // New tags were added
+                        {
+                            album.Tags = [.. existingSet];
+                            
+                            _logger.LogDebug("Added {Count} tags to album '{Album}'",
+                                existingSet.Count - initialCount, album.Name);
                             
                             return Task.FromResult<BaseItem?>(album); // Return modified album
                         }
@@ -1288,19 +1293,24 @@ public class MusicTagService(
                         .OrderBy(tag => tag)
                         .ToArray();
 
-                    // Only update if there are tags to add
+                    // Only update if there are tags to add (using HashSet for O(1) lookups)
                     if (aggregatedTags.Length > 0)
                     {
-                        var existingTags = artist.Tags?.ToList() ?? [];
-                        var newTags = aggregatedTags.Where(tag => !existingTags.Contains(tag, StringComparer.OrdinalIgnoreCase)).ToList();
+                        var existingSet = new HashSet<string>(artist.Tags ?? [], StringComparer.OrdinalIgnoreCase);
+                        var initialCount = existingSet.Count;
 
-                        if (newTags.Count > 0)
+                        // Add all aggregated tags (HashSet handles duplicates automatically)
+                        foreach (var tag in aggregatedTags)
                         {
-                            existingTags.AddRange(newTags);
-                            artist.Tags = [.. existingTags];
+                            existingSet.Add(tag);
+                        }
 
-                            _logger.LogDebug("Added {Count} tags to artist '{Artist}': {Tags}",
-                                newTags.Count, artist.Name, string.Join(", ", newTags));
+                        if (existingSet.Count > initialCount) // New tags were added
+                        {
+                            artist.Tags = [.. existingSet];
+                            
+                            _logger.LogDebug("Added {Count} tags to artist '{Artist}'",
+                                existingSet.Count - initialCount, artist.Name);
                             
                             return Task.FromResult<BaseItem?>(artist); // Return modified artist
                         }
