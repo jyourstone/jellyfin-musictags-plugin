@@ -27,6 +27,127 @@ public class MusicTagService(
     private readonly PluginConfiguration _configuration = configuration;
 
     /// <summary>
+    /// Calculates the maximum concurrency level based on processor count.
+    /// </summary>
+    /// <returns>Max concurrency: 1 if ProcessorCount &lt;= 3, otherwise ProcessorCount - 3, capped at 32.</returns>
+    private static int CalculateMaxConcurrency()
+    {
+        var processorCount = Environment.ProcessorCount;
+        return Math.Min(32, Math.Max(1, processorCount - 3));
+    }
+
+    /// <summary>
+    /// Processes a collection of items in parallel with semaphore-based concurrency control and progress reporting.
+    /// </summary>
+    /// <typeparam name="T">The type of items to process.</typeparam>
+    /// <param name="items">The collection of items to process.</param>
+    /// <param name="itemName">The name of the item type for logging (e.g., "albums", "artists").</param>
+    /// <param name="processAction">The action to perform on each item. Returns the item if it was modified, null otherwise.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A task representing the asynchronous operation.</returns>
+    private async Task ProcessItemsInParallelAsync<T>(
+        IReadOnlyList<T> items,
+        string itemName,
+        Func<T, CancellationToken, Task<T?>> processAction,
+        CancellationToken cancellationToken) where T : BaseItem
+    {
+        if (items.Count == 0)
+        {
+            return;
+        }
+
+        var maxConcurrency = CalculateMaxConcurrency();
+        var processorCount = Environment.ProcessorCount;
+        
+        _logger.LogInformation("Processing {ItemName} with {MaxConcurrency} concurrent operations (ProcessorCount: {ProcessorCount})", 
+            itemName, maxConcurrency, processorCount);
+
+        SemaphoreSlim? semaphore = null;
+        try
+        {
+            semaphore = new SemaphoreSlim(maxConcurrency, maxConcurrency);
+            var processedCount = 0;
+            var itemsToUpdate = new System.Collections.Concurrent.ConcurrentBag<T>();
+
+            var processingTasks = items.Select(async item =>
+            {
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    return;
+                }
+
+                var semaphoreAcquired = false;
+                try
+                {
+                    await semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
+                    semaphoreAcquired = true;
+
+                    if (cancellationToken.IsCancellationRequested)
+                    {
+                        return;
+                    }
+
+                    // Process the item
+                    var modifiedItem = await processAction(item, cancellationToken).ConfigureAwait(false);
+                    if (modifiedItem != null)
+                    {
+                        itemsToUpdate.Add(modifiedItem);
+                    }
+
+                    // Thread-safe progress reporting using Interlocked
+                    var currentCount = Interlocked.Increment(ref processedCount);
+                    if (currentCount % 100 == 0)
+                    {
+                        _logger.LogInformation("Processed {Count}/{Total} {ItemName} ({Percentage:F1}%)",
+                            currentCount, items.Count, currentCount * 100.0 / items.Count, itemName);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error processing {ItemName} '{Name}'", itemName, item.Name);
+                }
+                finally
+                {
+                    if (semaphoreAcquired)
+                    {
+                        semaphore.Release();
+                    }
+                }
+            });
+
+            await Task.WhenAll(processingTasks).ConfigureAwait(false);
+
+            // Batch update all modified items
+            if (itemsToUpdate.Count > 0)
+            {
+                _logger.LogInformation("Performing batch database update for {Count} modified {ItemName}", itemsToUpdate.Count, itemName);
+
+                var updateTasks = itemsToUpdate.Select(async item =>
+                {
+                    try
+                    {
+                        await _libraryManager.UpdateItemAsync(item, item, ItemUpdateType.MetadataEdit, cancellationToken).ConfigureAwait(false);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Error updating {ItemName} {Name}", itemName, item.Name);
+                    }
+                });
+
+                await Task.WhenAll(updateTasks).ConfigureAwait(false);
+                _logger.LogInformation("Completed batch database update for {ItemName}", itemName);
+            }
+
+            _logger.LogInformation("Completed processing {ItemName}. Processed {Count} items, updated {UpdatedCount} items", 
+                itemName, processedCount, itemsToUpdate.Count);
+        }
+        finally
+        {
+            semaphore?.Dispose();
+        }
+    }
+
+    /// <summary>
     /// Processes ID3 tags for a specific audio item (backwards compatibility method).
     /// </summary>
     /// <param name="audioItem">The audio item to process.</param>
@@ -463,7 +584,6 @@ public class MusicTagService(
             var processedCount = 0;
             var batchSize = Math.Min(Environment.ProcessorCount * 2, 10); // Limit concurrent operations
             semaphore = new SemaphoreSlim(batchSize, batchSize);
-            var progressLock = new object();
             var itemsToUpdate = new System.Collections.Concurrent.ConcurrentBag<Audio>();
 
             _logger.LogInformation("Processing tag removal with {BatchSize} concurrent operations", batchSize);
@@ -494,22 +614,14 @@ public class MusicTagService(
                         itemsToUpdate.Add(audioItem);
                     }
                     
-                    // Thread-safe progress reporting
-                    lock (progressLock)
+                    // Thread-safe progress reporting using Interlocked
+                    var currentCount = Interlocked.Increment(ref processedCount);
+                    if (currentCount % 100 == 0)
                     {
-                        processedCount++;
-                        if (processedCount % 100 == 0)
-                        {
-                            _logger.LogInformation("Processed {Count}/{Total} audio items for tag removal ({Percentage:F1}%)", 
-                                processedCount, audioItems.Count, 
-                                processedCount * 100.0 / audioItems.Count);
-                        }
+                        _logger.LogInformation("Processed {Count}/{Total} audio items for tag removal ({Percentage:F1}%)", 
+                            currentCount, audioItems.Count, 
+                            currentCount * 100.0 / audioItems.Count);
                     }
-                }
-                catch (OperationCanceledException)
-                {
-                    // Expected exception when cancellation is requested
-                    _logger.LogDebug("Tag removal cancelled for audio item {Name}", audioItem.Name);
                 }
                 catch (Exception ex)
                 {
@@ -602,7 +714,6 @@ public class MusicTagService(
             var processedCount = 0;
             var batchSize = Math.Min(Environment.ProcessorCount * 2, 10); // Limit concurrent operations
             semaphore = new SemaphoreSlim(batchSize, batchSize);
-            var progressLock = new object();
             var itemsToUpdate = new System.Collections.Concurrent.ConcurrentBag<Audio>();
 
             _logger.LogInformation("Processing with {BatchSize} concurrent operations", batchSize);
@@ -633,22 +744,14 @@ public class MusicTagService(
                         itemsToUpdate.Add(audioItem);
                     }
                     
-                    // Thread-safe progress reporting
-                    lock (progressLock)
+                    // Thread-safe progress reporting using Interlocked
+                    var currentCount = Interlocked.Increment(ref processedCount);
+                    if (currentCount % 100 == 0)
                     {
-                        processedCount++;
-                        if (processedCount % 100 == 0)
-                        {
-                            _logger.LogInformation("Processed {Count}/{Total} audio items ({Percentage:F1}%)", 
-                                processedCount, audioItems.Count, 
-                                processedCount * 100.0 / audioItems.Count);
-                        }
+                        _logger.LogInformation("Processed {Count}/{Total} audio items ({Percentage:F1}%)", 
+                            currentCount, audioItems.Count, 
+                            currentCount * 100.0 / audioItems.Count);
                     }
-                }
-                catch (OperationCanceledException)
-                {
-                    // Expected exception when cancellation is requested
-                    _logger.LogDebug("Processing cancelled for audio item {Name}", audioItem.Name);
                 }
                 catch (Exception ex)
                 {
@@ -1082,157 +1185,64 @@ public class MusicTagService(
     /// <returns>A task representing the asynchronous operation.</returns>
     private async Task PropagateTagsToAlbumsAsync(CancellationToken cancellationToken)
     {
-        SemaphoreSlim? semaphore = null;
-        try
+        _logger.LogInformation("Propagating tags to albums");
+
+        // Get all music albums
+        var albumQuery = new InternalItemsQuery(null)
         {
-            _logger.LogInformation("Propagating tags to albums");
+            IncludeItemTypes = [BaseItemKind.MusicAlbum],
+            Recursive = true
+        };
 
-            // Get all music albums
-            var albumQuery = new InternalItemsQuery(null)
+        var albums = _libraryManager.GetItemsResult(albumQuery).Items.ToList();
+        _logger.LogInformation("Found {Count} albums to update", albums.Count);
+
+        await ProcessItemsInParallelAsync(
+            albums,
+            "albums for tag propagation",
+            (album, ct) =>
             {
-                IncludeItemTypes = [BaseItemKind.MusicAlbum],
-                Recursive = true
-            };
-
-            var albums = _libraryManager.GetItemsResult(albumQuery).Items.ToList();
-            _logger.LogInformation("Found {Count} albums to update", albums.Count);
-
-            if (albums.Count == 0)
-            {
-                _logger.LogInformation("No albums found, skipping tag propagation");
-                return;
-            }
-
-            // Calculate concurrency: Sequential if <= 3 cores, otherwise ProcessorCount - 3
-            var processorCount = Environment.ProcessorCount;
-            var maxConcurrency = processorCount <= 3 ? 1 : processorCount - 3;
-            semaphore = new SemaphoreSlim(maxConcurrency, maxConcurrency);
-            
-            _logger.LogInformation("Processing album tag propagation with {MaxConcurrency} concurrent operations (ProcessorCount: {ProcessorCount})", 
-                maxConcurrency, processorCount);
-
-            var processedCount = 0;
-            var progressLock = new object();
-            var itemsToUpdate = new System.Collections.Concurrent.ConcurrentBag<BaseItem>();
-
-            var processingTasks = albums.Select(async album =>
-            {
-                if (cancellationToken.IsCancellationRequested)
+                // Get all songs in this album
+                var songsQuery = new InternalItemsQuery(null)
                 {
-                    return;
-                }
+                    IncludeItemTypes = [BaseItemKind.Audio],
+                    Parent = album,
+                    Recursive = false
+                };
 
-                var semaphoreAcquired = false;
-                try
+                var songs = _libraryManager.GetItemsResult(songsQuery).Items.OfType<Audio>().ToList();
+
+                if (songs.Count > 0)
                 {
-                    await semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
-                    semaphoreAcquired = true;
+                    // Aggregate all unique tags from songs
+                    var aggregatedTags = songs
+                        .SelectMany(song => song.Tags ?? [])
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .OrderBy(tag => tag)
+                        .ToArray();
 
-                    if (cancellationToken.IsCancellationRequested)
+                    // Only update if there are tags to add
+                    if (aggregatedTags.Length > 0)
                     {
-                        return;
-                    }
+                        var existingTags = album.Tags?.ToList() ?? [];
+                        var newTags = aggregatedTags.Where(tag => !existingTags.Contains(tag, StringComparer.OrdinalIgnoreCase)).ToList();
 
-                    // Get all songs in this album
-                    var songsQuery = new InternalItemsQuery(null)
-                    {
-                        IncludeItemTypes = [BaseItemKind.Audio],
-                        Parent = album,
-                        Recursive = false
-                    };
-
-                    var songs = _libraryManager.GetItemsResult(songsQuery).Items.OfType<Audio>().ToList();
-
-                    if (songs.Count > 0)
-                    {
-                        // Aggregate all unique tags from songs
-                        var aggregatedTags = songs
-                            .SelectMany(song => song.Tags ?? [])
-                            .Distinct(StringComparer.OrdinalIgnoreCase)
-                            .OrderBy(tag => tag)
-                            .ToArray();
-
-                        // Only update if there are tags to add
-                        if (aggregatedTags.Length > 0)
+                        if (newTags.Count > 0)
                         {
-                            var existingTags = album.Tags?.ToList() ?? [];
-                            var newTags = aggregatedTags.Where(tag => !existingTags.Contains(tag, StringComparer.OrdinalIgnoreCase)).ToList();
+                            existingTags.AddRange(newTags);
+                            album.Tags = [.. existingTags];
 
-                            if (newTags.Count > 0)
-                            {
-                                existingTags.AddRange(newTags);
-                                album.Tags = [.. existingTags];
-                                itemsToUpdate.Add(album);
-
-                                _logger.LogDebug("Added {Count} tags to album '{Album}': {Tags}",
-                                    newTags.Count, album.Name, string.Join(", ", newTags));
-                            }
-                        }
-                    }
-
-                    // Thread-safe progress reporting
-                    lock (progressLock)
-                    {
-                        processedCount++;
-                        if (processedCount % 100 == 0)
-                        {
-                            _logger.LogInformation("Processed {Count}/{Total} albums for tag propagation ({Percentage:F1}%)",
-                                processedCount, albums.Count, processedCount * 100.0 / albums.Count);
+                            _logger.LogDebug("Added {Count} tags to album '{Album}': {Tags}",
+                                newTags.Count, album.Name, string.Join(", ", newTags));
+                            
+                            return Task.FromResult<BaseItem?>(album); // Return modified album
                         }
                     }
                 }
-                catch (OperationCanceledException)
-                {
-                    _logger.LogDebug("Tag propagation cancelled for album {Name}", album.Name);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Error propagating tags to album '{Album}'", album.Name);
-                }
-                finally
-                {
-                    if (semaphoreAcquired)
-                    {
-                        semaphore.Release();
-                    }
-                }
-            });
 
-            await Task.WhenAll(processingTasks).ConfigureAwait(false);
-
-            // Batch update all modified items
-            if (itemsToUpdate.Count > 0)
-            {
-                _logger.LogInformation("Performing batch database update for {Count} modified albums", itemsToUpdate.Count);
-
-                var updateTasks = itemsToUpdate.Select(async album =>
-                {
-                    try
-                    {
-                        await _libraryManager.UpdateItemAsync(album, album, ItemUpdateType.MetadataEdit, cancellationToken).ConfigureAwait(false);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogError(ex, "Error updating album {Name}", album.Name);
-                    }
-                });
-
-                await Task.WhenAll(updateTasks).ConfigureAwait(false);
-                _logger.LogInformation("Completed batch database update for album tag propagation");
-            }
-
-            _logger.LogInformation("Completed tag propagation to albums. Processed {Count} albums, updated {UpdatedCount} albums", 
-                processedCount, itemsToUpdate.Count);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error during tag propagation to albums");
-            throw;
-        }
-        finally
-        {
-            semaphore?.Dispose();
-        }
+                return Task.FromResult<BaseItem?>(null); // No changes
+            },
+            cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -1242,157 +1252,64 @@ public class MusicTagService(
     /// <returns>A task representing the asynchronous operation.</returns>
     private async Task PropagateTagsToArtistsAsync(CancellationToken cancellationToken)
     {
-        SemaphoreSlim? semaphore = null;
-        try
+        _logger.LogInformation("Propagating tags to artists");
+
+        // Get all music artists
+        var artistQuery = new InternalItemsQuery(null)
         {
-            _logger.LogInformation("Propagating tags to artists");
+            IncludeItemTypes = [BaseItemKind.MusicArtist],
+            Recursive = true
+        };
 
-            // Get all music artists
-            var artistQuery = new InternalItemsQuery(null)
+        var artists = _libraryManager.GetItemsResult(artistQuery).Items.ToList();
+        _logger.LogInformation("Found {Count} artists to update", artists.Count);
+
+        await ProcessItemsInParallelAsync(
+            artists,
+            "artists for tag propagation",
+            (artist, ct) =>
             {
-                IncludeItemTypes = [BaseItemKind.MusicArtist],
-                Recursive = true
-            };
-
-            var artists = _libraryManager.GetItemsResult(artistQuery).Items.ToList();
-            _logger.LogInformation("Found {Count} artists to update", artists.Count);
-
-            if (artists.Count == 0)
-            {
-                _logger.LogInformation("No artists found, skipping tag propagation");
-                return;
-            }
-
-            // Calculate concurrency: Sequential if <= 3 cores, otherwise ProcessorCount - 3
-            var processorCount = Environment.ProcessorCount;
-            var maxConcurrency = processorCount <= 3 ? 1 : processorCount - 3;
-            semaphore = new SemaphoreSlim(maxConcurrency, maxConcurrency);
-            
-            _logger.LogInformation("Processing artist tag propagation with {MaxConcurrency} concurrent operations (ProcessorCount: {ProcessorCount})", 
-                maxConcurrency, processorCount);
-
-            var processedCount = 0;
-            var progressLock = new object();
-            var itemsToUpdate = new System.Collections.Concurrent.ConcurrentBag<BaseItem>();
-
-            var processingTasks = artists.Select(async artist =>
-            {
-                if (cancellationToken.IsCancellationRequested)
+                // Get all songs by this artist
+                var songsQuery = new InternalItemsQuery(null)
                 {
-                    return;
-                }
+                    IncludeItemTypes = [BaseItemKind.Audio],
+                    ArtistIds = [artist.Id],
+                    Recursive = true
+                };
 
-                var semaphoreAcquired = false;
-                try
+                var songs = _libraryManager.GetItemsResult(songsQuery).Items.OfType<Audio>().ToList();
+
+                if (songs.Count > 0)
                 {
-                    await semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
-                    semaphoreAcquired = true;
+                    // Aggregate all unique tags from songs
+                    var aggregatedTags = songs
+                        .SelectMany(song => song.Tags ?? [])
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .OrderBy(tag => tag)
+                        .ToArray();
 
-                    if (cancellationToken.IsCancellationRequested)
+                    // Only update if there are tags to add
+                    if (aggregatedTags.Length > 0)
                     {
-                        return;
-                    }
+                        var existingTags = artist.Tags?.ToList() ?? [];
+                        var newTags = aggregatedTags.Where(tag => !existingTags.Contains(tag, StringComparer.OrdinalIgnoreCase)).ToList();
 
-                    // Get all songs by this artist
-                    var songsQuery = new InternalItemsQuery(null)
-                    {
-                        IncludeItemTypes = [BaseItemKind.Audio],
-                        ArtistIds = [artist.Id],
-                        Recursive = true
-                    };
-
-                    var songs = _libraryManager.GetItemsResult(songsQuery).Items.OfType<Audio>().ToList();
-
-                    if (songs.Count > 0)
-                    {
-                        // Aggregate all unique tags from songs
-                        var aggregatedTags = songs
-                            .SelectMany(song => song.Tags ?? [])
-                            .Distinct(StringComparer.OrdinalIgnoreCase)
-                            .OrderBy(tag => tag)
-                            .ToArray();
-
-                        // Only update if there are tags to add
-                        if (aggregatedTags.Length > 0)
+                        if (newTags.Count > 0)
                         {
-                            var existingTags = artist.Tags?.ToList() ?? [];
-                            var newTags = aggregatedTags.Where(tag => !existingTags.Contains(tag, StringComparer.OrdinalIgnoreCase)).ToList();
+                            existingTags.AddRange(newTags);
+                            artist.Tags = [.. existingTags];
 
-                            if (newTags.Count > 0)
-                            {
-                                existingTags.AddRange(newTags);
-                                artist.Tags = [.. existingTags];
-                                itemsToUpdate.Add(artist);
-
-                                _logger.LogDebug("Added {Count} tags to artist '{Artist}': {Tags}",
-                                    newTags.Count, artist.Name, string.Join(", ", newTags));
-                            }
-                        }
-                    }
-
-                    // Thread-safe progress reporting
-                    lock (progressLock)
-                    {
-                        processedCount++;
-                        if (processedCount % 100 == 0)
-                        {
-                            _logger.LogInformation("Processed {Count}/{Total} artists for tag propagation ({Percentage:F1}%)",
-                                processedCount, artists.Count, processedCount * 100.0 / artists.Count);
+                            _logger.LogDebug("Added {Count} tags to artist '{Artist}': {Tags}",
+                                newTags.Count, artist.Name, string.Join(", ", newTags));
+                            
+                            return Task.FromResult<BaseItem?>(artist); // Return modified artist
                         }
                     }
                 }
-                catch (OperationCanceledException)
-                {
-                    _logger.LogDebug("Tag propagation cancelled for artist {Name}", artist.Name);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Error propagating tags to artist '{Artist}'", artist.Name);
-                }
-                finally
-                {
-                    if (semaphoreAcquired)
-                    {
-                        semaphore.Release();
-                    }
-                }
-            });
 
-            await Task.WhenAll(processingTasks).ConfigureAwait(false);
-
-            // Batch update all modified items
-            if (itemsToUpdate.Count > 0)
-            {
-                _logger.LogInformation("Performing batch database update for {Count} modified artists", itemsToUpdate.Count);
-
-                var updateTasks = itemsToUpdate.Select(async artist =>
-                {
-                    try
-                    {
-                        await _libraryManager.UpdateItemAsync(artist, artist, ItemUpdateType.MetadataEdit, cancellationToken).ConfigureAwait(false);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogError(ex, "Error updating artist {Name}", artist.Name);
-                    }
-                });
-
-                await Task.WhenAll(updateTasks).ConfigureAwait(false);
-                _logger.LogInformation("Completed batch database update for artist tag propagation");
-            }
-
-            _logger.LogInformation("Completed tag propagation to artists. Processed {Count} artists, updated {UpdatedCount} artists", 
-                processedCount, itemsToUpdate.Count);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error during tag propagation to artists");
-            throw;
-        }
-        finally
-        {
-            semaphore?.Dispose();
-        }
+                return Task.FromResult<BaseItem?>(null); // No changes
+            },
+            cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -1403,126 +1320,27 @@ public class MusicTagService(
     /// <returns>A task representing the asynchronous operation.</returns>
     private async Task RemoveTagsFromAlbumsAsync(string tagsToRemove, CancellationToken cancellationToken)
     {
-        SemaphoreSlim? semaphore = null;
-        try
+        _logger.LogInformation("Removing tags from albums: {TagsToRemove}", tagsToRemove);
+
+        // Get all music albums
+        var albumQuery = new InternalItemsQuery(null)
         {
-            _logger.LogInformation("Removing tags from albums: {TagsToRemove}", tagsToRemove);
+            IncludeItemTypes = [BaseItemKind.MusicAlbum],
+            Recursive = true
+        };
 
-            // Get all music albums
-            var albumQuery = new InternalItemsQuery(null)
+        var albums = _libraryManager.GetItemsResult(albumQuery).Items.ToList();
+        _logger.LogInformation("Found {Count} albums to process for tag removal", albums.Count);
+
+        await ProcessItemsInParallelAsync(
+            albums,
+            "albums for tag removal",
+            (album, ct) =>
             {
-                IncludeItemTypes = [BaseItemKind.MusicAlbum],
-                Recursive = true
-            };
-
-            var albums = _libraryManager.GetItemsResult(albumQuery).Items.ToList();
-            _logger.LogInformation("Found {Count} albums to process for tag removal", albums.Count);
-
-            if (albums.Count == 0)
-            {
-                _logger.LogInformation("No albums found, skipping tag removal");
-                return;
-            }
-
-            // Calculate concurrency: Sequential if <= 3 cores, otherwise ProcessorCount - 3
-            var processorCount = Environment.ProcessorCount;
-            var maxConcurrency = processorCount <= 3 ? 1 : processorCount - 3;
-            semaphore = new SemaphoreSlim(maxConcurrency, maxConcurrency);
-            
-            _logger.LogInformation("Processing album tag removal with {MaxConcurrency} concurrent operations (ProcessorCount: {ProcessorCount})", 
-                maxConcurrency, processorCount);
-
-            var processedCount = 0;
-            var progressLock = new object();
-            var itemsToUpdate = new System.Collections.Concurrent.ConcurrentBag<BaseItem>();
-
-            var processingTasks = albums.Select(async album =>
-            {
-                if (cancellationToken.IsCancellationRequested)
-                {
-                    return;
-                }
-
-                var semaphoreAcquired = false;
-                try
-                {
-                    await semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
-                    semaphoreAcquired = true;
-
-                    if (cancellationToken.IsCancellationRequested)
-                    {
-                        return;
-                    }
-
-                    var wasModified = RemoveTagsInternal(album, tagsToRemove);
-                    if (wasModified)
-                    {
-                        itemsToUpdate.Add(album);
-                    }
-
-                    // Thread-safe progress reporting
-                    lock (progressLock)
-                    {
-                        processedCount++;
-                        if (processedCount % 100 == 0)
-                        {
-                            _logger.LogInformation("Processed {Count}/{Total} albums for tag removal ({Percentage:F1}%)",
-                                processedCount, albums.Count, processedCount * 100.0 / albums.Count);
-                        }
-                    }
-                }
-                catch (OperationCanceledException)
-                {
-                    _logger.LogDebug("Tag removal cancelled for album {Name}", album.Name);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Error removing tags from album '{Album}'", album.Name);
-                }
-                finally
-                {
-                    if (semaphoreAcquired)
-                    {
-                        semaphore.Release();
-                    }
-                }
-            });
-
-            await Task.WhenAll(processingTasks).ConfigureAwait(false);
-
-            // Batch update all modified items
-            if (itemsToUpdate.Count > 0)
-            {
-                _logger.LogInformation("Performing batch database update for {Count} modified albums", itemsToUpdate.Count);
-
-                var updateTasks = itemsToUpdate.Select(async album =>
-                {
-                    try
-                    {
-                        await _libraryManager.UpdateItemAsync(album, album, ItemUpdateType.MetadataEdit, cancellationToken).ConfigureAwait(false);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogError(ex, "Error updating album {Name}", album.Name);
-                    }
-                });
-
-                await Task.WhenAll(updateTasks).ConfigureAwait(false);
-                _logger.LogInformation("Completed batch database update for album tag removal");
-            }
-
-            _logger.LogInformation("Completed tag removal from albums. Processed {Count} albums, updated {UpdatedCount} albums", 
-                processedCount, itemsToUpdate.Count);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error during tag removal from albums");
-            throw;
-        }
-        finally
-        {
-            semaphore?.Dispose();
-        }
+                var wasModified = RemoveTagsInternal(album, tagsToRemove);
+                return Task.FromResult(wasModified ? album : null);
+            },
+            cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -1533,125 +1351,26 @@ public class MusicTagService(
     /// <returns>A task representing the asynchronous operation.</returns>
     private async Task RemoveTagsFromArtistsAsync(string tagsToRemove, CancellationToken cancellationToken)
     {
-        SemaphoreSlim? semaphore = null;
-        try
+        _logger.LogInformation("Removing tags from artists: {TagsToRemove}", tagsToRemove);
+
+        // Get all music artists
+        var artistQuery = new InternalItemsQuery(null)
         {
-            _logger.LogInformation("Removing tags from artists: {TagsToRemove}", tagsToRemove);
+            IncludeItemTypes = [BaseItemKind.MusicArtist],
+            Recursive = true
+        };
 
-            // Get all music artists
-            var artistQuery = new InternalItemsQuery(null)
+        var artists = _libraryManager.GetItemsResult(artistQuery).Items.ToList();
+        _logger.LogInformation("Found {Count} artists to process for tag removal", artists.Count);
+
+        await ProcessItemsInParallelAsync(
+            artists,
+            "artists for tag removal",
+            (artist, ct) =>
             {
-                IncludeItemTypes = [BaseItemKind.MusicArtist],
-                Recursive = true
-            };
-
-            var artists = _libraryManager.GetItemsResult(artistQuery).Items.ToList();
-            _logger.LogInformation("Found {Count} artists to process for tag removal", artists.Count);
-
-            if (artists.Count == 0)
-            {
-                _logger.LogInformation("No artists found, skipping tag removal");
-                return;
-            }
-
-            // Calculate concurrency: Sequential if <= 3 cores, otherwise ProcessorCount - 3
-            var processorCount = Environment.ProcessorCount;
-            var maxConcurrency = processorCount <= 3 ? 1 : processorCount - 3;
-            semaphore = new SemaphoreSlim(maxConcurrency, maxConcurrency);
-            
-            _logger.LogInformation("Processing artist tag removal with {MaxConcurrency} concurrent operations (ProcessorCount: {ProcessorCount})", 
-                maxConcurrency, processorCount);
-
-            var processedCount = 0;
-            var progressLock = new object();
-            var itemsToUpdate = new System.Collections.Concurrent.ConcurrentBag<BaseItem>();
-
-            var processingTasks = artists.Select(async artist =>
-            {
-                if (cancellationToken.IsCancellationRequested)
-                {
-                    return;
-                }
-
-                var semaphoreAcquired = false;
-                try
-                {
-                    await semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
-                    semaphoreAcquired = true;
-
-                    if (cancellationToken.IsCancellationRequested)
-                    {
-                        return;
-                    }
-
-                    var wasModified = RemoveTagsInternal(artist, tagsToRemove);
-                    if (wasModified)
-                    {
-                        itemsToUpdate.Add(artist);
-                    }
-
-                    // Thread-safe progress reporting
-                    lock (progressLock)
-                    {
-                        processedCount++;
-                        if (processedCount % 100 == 0)
-                        {
-                            _logger.LogInformation("Processed {Count}/{Total} artists for tag removal ({Percentage:F1}%)",
-                                processedCount, artists.Count, processedCount * 100.0 / artists.Count);
-                        }
-                    }
-                }
-                catch (OperationCanceledException)
-                {
-                    _logger.LogDebug("Tag removal cancelled for artist {Name}", artist.Name);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Error removing tags from artist '{Artist}'", artist.Name);
-                }
-                finally
-                {
-                    if (semaphoreAcquired)
-                    {
-                        semaphore.Release();
-                    }
-                }
-            });
-
-            await Task.WhenAll(processingTasks).ConfigureAwait(false);
-
-            // Batch update all modified items
-            if (itemsToUpdate.Count > 0)
-            {
-                _logger.LogInformation("Performing batch database update for {Count} modified artists", itemsToUpdate.Count);
-
-                var updateTasks = itemsToUpdate.Select(async artist =>
-                {
-                    try
-                    {
-                        await _libraryManager.UpdateItemAsync(artist, artist, ItemUpdateType.MetadataEdit, cancellationToken).ConfigureAwait(false);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogError(ex, "Error updating artist {Name}", artist.Name);
-                    }
-                });
-
-                await Task.WhenAll(updateTasks).ConfigureAwait(false);
-                _logger.LogInformation("Completed batch database update for artist tag removal");
-            }
-
-            _logger.LogInformation("Completed tag removal from artists. Processed {Count} artists, updated {UpdatedCount} artists", 
-                processedCount, itemsToUpdate.Count);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error during tag removal from artists");
-            throw;
-        }
-        finally
-        {
-            semaphore?.Dispose();
-        }
+                var wasModified = RemoveTagsInternal(artist, tagsToRemove);
+                return Task.FromResult(wasModified ? artist : null);
+            },
+            cancellationToken).ConfigureAwait(false);
     }
 } 
