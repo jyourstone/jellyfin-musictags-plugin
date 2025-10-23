@@ -209,8 +209,8 @@ public class MusicTagsController(
                 var configuration = Plugin.Instance?.Configuration ?? new PluginConfiguration();
                 var musicTagService = new MusicTagService(serviceLogger, _libraryManager, configuration);
 
-                // Remove the specified tags from all audio items
-                await musicTagService.RemoveTagsFromAllAudioItemsAsync(request.TagsToRemove, cancellationToken).ConfigureAwait(false);
+                // Remove the specified tags from all audio items (and optionally from parents)
+                await musicTagService.RemoveTagsFromAllAudioItemsAsync(request.TagsToRemove, request.RemoveFromParents, cancellationToken).ConfigureAwait(false);
                 
                 var result = new ProcessingResult
                 {
@@ -254,6 +254,11 @@ public class RemoveTagsRequest
     /// Gets or sets the comma-separated list of tag names to remove.
     /// </summary>
     public string TagsToRemove { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether to also remove tags from parent albums and artists.
+    /// </summary>
+    public bool RemoveFromParents { get; set; }
 }
 
 /// <summary>

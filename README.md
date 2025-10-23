@@ -18,6 +18,7 @@ Requires Jellyfin version `10.10.0` or newer. New functionality is only develope
 - 🎵 **Multi-Format Support** - Extracts tags from ID3v2, Vorbis comments (FLAC/OGG), and other audio metadata formats
 - 🏷️ **Flexible Tag Extraction** - Configure which specific tags to extract and add to Jellyfin
 - ✂️ **Delimiter Splitting** - Automatically split multi-value tags into separate Jellyfin tags for better filtering
+- 📚 **Parent Propagation** - Automatically apply tags from songs to their parent albums and artists
 - 🧹 **Tag Cleanup** - Remove unwanted tags from your Jellyfin library
 - ⚙️ **Configurable Options** - Choose whether to overwrite existing tags or preserve them
 - 🔄 **Automatic Processing** - Scheduled task automatically processes new and updated audio files
@@ -56,6 +57,7 @@ The configuration page allows you to:
 
 4. **Processing Options**: Control how tags are processed
    - **Overwrite Existing Tags**: Replace existing Jellyfin tags with extracted audio file tags
+   - **Propagate Tags to Parent Albums and Artists**: Automatically apply tags from songs to their parent album and artist items. Note: This adds tags to parents; it does not remove existing parent tags. To remove tags from parents, use Tag Cleanup with "Also remove from albums and artists" enabled.
    - **Manual Processing**: Trigger immediate processing of all audio files
 
 ### Supported Tag Formats
@@ -106,7 +108,16 @@ If your audio files contain multiple genres separated by delimiters:
 - This enables Jellyfin's instant mix to pull from either genre catalog
 - Perfect for parental control filtering by individual genres
 
-### Example 3: Clean Up Old Tags
+### Example 3: Enable Parental Controls with Tag Propagation
+For parental control filtering to work at album/artist level:
+- **Tag Names to Extract**: `GENRE`
+- **Propagate Tags to Parent Albums and Artists**: ✅ Enabled
+- After processing, songs' genre tags will be applied to their albums and artists
+- You can then use Jellyfin's parental controls to block specific genres for users
+- **Example**: If all songs in an album have `GENRE:Rock`, the album will also get `GENRE:Rock`. If you block Rock for a user, they won't see the album at all.
+- **Note**: Propagation adds tags to parents but doesn't remove them. To clean up parent tags after removing song tags, run Tag Cleanup with "Also remove from albums and artists" enabled.
+
+### Example 4: Clean Up Old Tags
 Remove unwanted tags from your library:
 - **Tag Names to Remove**: `BPM`
 - This will remove all instances of these tags from your Jellyfin music library

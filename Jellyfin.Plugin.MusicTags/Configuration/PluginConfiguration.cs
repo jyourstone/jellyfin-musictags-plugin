@@ -16,6 +16,7 @@ public class PluginConfiguration : BasePluginConfiguration
         TagNames = string.Empty;
         OverwriteExistingTags = false;
         TagDelimiters = string.Empty;
+        PropagateTagsToParents = false;
     }
 
     /// <summary>
@@ -35,4 +36,11 @@ public class PluginConfiguration : BasePluginConfiguration
     /// When a tag value contains any of these delimiters, it will be split into separate tags.
     /// </summary>
     public string TagDelimiters { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether to propagate tags from songs to their parent albums and artists.
+    /// When enabled, tags extracted from songs will be aggregated and applied to their parent album and artist items.
+    /// This is useful for parental controls and filtering at the album/artist level.
+    /// </summary>
+    public bool PropagateTagsToParents { get; set; }
 }
