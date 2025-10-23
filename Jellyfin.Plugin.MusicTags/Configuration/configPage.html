@@ -33,13 +33,13 @@
 
                     <div class="inputContainer">
                         <label class="inputLabel inputLabelUnfocused" for="TagDelimiters">Tag Value Delimiters</label>
-                        <input id="TagDelimiters" name="TagDelimiters" type="text" is="emby-input" placeholder="e.g., ;|\" />
+                        <input id="TagDelimiters" name="TagDelimiters" type="text" is="emby-input" placeholder="e.g., /|;" />
                         <div class="fieldDescription">
                             Custom delimiters for splitting tag values into multiple separate tags.
-                            Enter each delimiter character in sequence (e.g., "/|;\").
+                            Enter each delimiter as a single character in sequence (e.g., <code>/|;</code> for slash, pipe, and semicolon). Each character is treated as a separate delimiter.
                             <br/>
-                            <strong>Example:</strong> If you have "GENRE:Rock;Metal" and configure ";" as a delimiter, 
-                            it will create two tags: "GENRE:Rock" and "GENRE:Metal".
+                            <strong>Example:</strong> If you have <code>GENRE:Rock;Metal</code> and configure <code>;</code> as a delimiter, 
+                            it will create two tags: <code>GENRE:Rock</code> and <code>GENRE:Metal</code>.
                             <br/>
                             Leave empty to disable delimiter splitting.
                         </div>

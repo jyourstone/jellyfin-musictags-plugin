@@ -44,7 +44,8 @@ The configuration page allows you to:
    - Tags are added to Jellyfin in the format "TagName:Value" (e.g., "BPM:141")
 
 2. **Tag Value Delimiters**: Split multi-value tags into separate tags
-   - Enter delimiter characters (e.g., "/|;\" for slash, pipe, semicolon, and backslash)
+   - Enter delimiter characters (e.g., `/|;\` for slash, pipe, semicolon, and backslash)
+   - Each character in the string is treated as a separate single-character delimiter
    - Automatically splits tag values containing these delimiters into multiple tags
    - Perfect for multi-genre tracks, parental controls, and instant mix functionality
    - Leave empty to disable splitting
@@ -98,7 +99,7 @@ Configure the plugin to extract BPM and KEY information:
 ### Example 2: Split Multi-Genre Tags
 If your audio files contain multiple genres separated by delimiters:
 - **Tag Names to Extract**: `GENRE`
-- **Tag Value Delimiters**: `/|\`
+- **Tag Value Delimiters**: `/|\` (forward slash, pipe, and backslash as individual delimiters)
 - A file with `GENRE=Progressive Rock\Psychedelic Rock` will create two separate tags:
   - `GENRE:Progressive Rock`
   - `GENRE:Psychedelic Rock`
