@@ -78,7 +78,17 @@ public class MusicTagService(
                 var value = ExtractTagValue(file, tagName);
                 if (!string.IsNullOrEmpty(value))
                 {
-                    tags.Add($"{tagName}:{value}");
+                    // Split the value based on configured delimiters if any
+                    var splitValues = SplitTagValue(value);
+                    
+                    // Add each split value as a separate tag with the same tag name
+                    foreach (var splitValue in splitValues)
+                    {
+                        if (!string.IsNullOrWhiteSpace(splitValue))
+                        {
+                            tags.Add($"{tagName}:{splitValue}");
+                        }
+                    }
                 }
                 else
                 {
@@ -94,6 +104,49 @@ public class MusicTagService(
         }
 
         return tags;
+    }
+
+    /// <summary>
+    /// Splits a tag value based on configured delimiters.
+    /// </summary>
+    /// <param name="value">The tag value to split.</param>
+    /// <returns>A list of split values. If no delimiters are configured, returns the original value in a list.</returns>
+    private List<string> SplitTagValue(string value)
+    {
+        try
+        {
+            // If no delimiters are configured, return the original value
+            if (string.IsNullOrWhiteSpace(_configuration.TagDelimiters))
+            {
+                return [value];
+            }
+
+            // Get individual delimiter characters from the configuration string
+            var delimiters = _configuration.TagDelimiters.ToCharArray();
+            
+            _logger.LogDebug("Splitting tag value '{Value}' using delimiters: [{Delimiters}]", 
+                value, string.Join(", ", delimiters.Select(d => $"'{d}'")));
+
+            // Split the value on any of the configured delimiters
+            var splitValues = value
+                .Split(delimiters, StringSplitOptions.RemoveEmptyEntries)
+                .Select(v => v.Trim())
+                .Where(v => !string.IsNullOrWhiteSpace(v))
+                .ToList();
+
+            if (splitValues.Count > 1)
+            {
+                _logger.LogDebug("Split '{Value}' into {Count} values: [{SplitValues}]", 
+                    value, splitValues.Count, string.Join(", ", splitValues));
+            }
+
+            return splitValues;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error splitting tag value '{Value}', returning original value", value);
+            return [value];
+        }
     }
 
     /// <summary>

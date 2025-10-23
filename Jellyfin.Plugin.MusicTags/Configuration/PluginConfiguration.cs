@@ -15,6 +15,7 @@ public class PluginConfiguration : BasePluginConfiguration
         // Set default options
         TagNames = string.Empty;
         OverwriteExistingTags = false;
+        TagDelimiters = string.Empty;
     }
 
     /// <summary>
@@ -27,4 +28,11 @@ public class PluginConfiguration : BasePluginConfiguration
     /// Gets or sets a value indicating whether to overwrite existing tags.
     /// </summary>
     public bool OverwriteExistingTags { get; set; }
+
+    /// <summary>
+    /// Gets or sets the custom delimiters for splitting tag values into multiple tags.
+    /// Multiple delimiters can be specified in sequence (e.g., ";|\").
+    /// When a tag value contains any of these delimiters, it will be split into separate tags.
+    /// </summary>
+    public string TagDelimiters { get; set; } = string.Empty;
 }
