@@ -30,6 +30,9 @@ public class MusicTagService(
     /// Comprehensive mapping of friendly tag names to their ID3v2 frame identifiers.
     /// This allows users to use intuitive names (e.g., "FILETYPE") that work consistently
     /// across file formats, automatically translating to the correct ID3v2 frame ID (e.g., "TFLT").
+    /// 
+    /// Note: Some entries are intentional aliases (e.g., "KEY" and "INITIALKEY" both map to "TKEY")
+    /// to provide flexibility and support different tagging conventions.
     /// </summary>
     private static readonly Dictionary<string, string> TagNameToFrameId = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -114,13 +117,13 @@ public class MusicTagService(
         // Check for matching double quotes
         if (value.StartsWith("\"") && value.EndsWith("\""))
         {
-            return value.Substring(1, value.Length - 2);
+            return value[1..^1];
         }
 
         // Check for matching single quotes
         if (value.StartsWith("'") && value.EndsWith("'"))
         {
-            return value.Substring(1, value.Length - 2);
+            return value[1..^1];
         }
 
         // No matching quotes, return as-is
