@@ -27,6 +27,110 @@ public class MusicTagService(
     private readonly PluginConfiguration _configuration = configuration;
 
     /// <summary>
+    /// Comprehensive mapping of friendly tag names to their ID3v2 frame identifiers.
+    /// This allows users to use intuitive names (e.g., "FILETYPE") that work consistently
+    /// across file formats, automatically translating to the correct ID3v2 frame ID (e.g., "TFLT").
+    /// 
+    /// Note: Some entries are intentional aliases (e.g., "KEY" and "INITIALKEY" both map to "TKEY")
+    /// to provide flexibility and support different tagging conventions.
+    /// </summary>
+    private static readonly Dictionary<string, string> TagNameToFrameId = new(StringComparer.OrdinalIgnoreCase)
+    {
+        // Audio file and technical information
+        { "FILETYPE", "TFLT" },
+        { "MEDIATYPE", "TMED" },
+        { "ENCODEDBY", "TENC" },
+        { "ENCODERSETTINGS", "TSSE" },
+        { "LENGTH", "TLEN" },
+        
+        // Content descriptors
+        { "CONTENTTYPE", "TCON" },  // Genre
+        { "CONTENTGROUP", "TIT1" },  // Content group description
+        { "SUBTITLE", "TIT3" },  // Subtitle/Description refinement
+        { "LANGUAGE", "TLAN" },
+        { "MOOD", "TMOO" },
+        
+        // Musical key and tempo
+        { "KEY", "TKEY" },
+        { "INITIALKEY", "TKEY" },
+        { "BPM", "TBPM" },
+        
+        // People and organizations
+        { "ORIGINALARTIST", "TOPE" },
+        { "LYRICIST", "TEXT" },
+        { "COMPOSER", "TCOM" },
+        { "CONDUCTOR", "TPE3" },
+        { "REMIXER", "TPE4" },
+        { "INVOLVEDPEOPLE", "TIPL" },
+        { "MUSICIANCREDITS", "TMCL" },
+        { "BAND", "TPE2" },  // Band/Orchestra/Accompaniment
+        
+        // Original release information
+        { "ORIGINALALBUM", "TOAL" },
+        { "ORIGINALFILENAME", "TOFN" },
+        { "ORIGINALYEAR", "TORY" },
+        { "ORIGINALDATE", "TDOR" },
+        { "ORIGINALLYRICIST", "TOLY" },
+        
+        // Rights and legal
+        { "COPYRIGHT", "TCOP" },
+        { "PUBLISHER", "TPUB" },
+        { "OWNER", "TOWN" },
+        { "PRODUCEDNOTICE", "TPRO" },
+        
+        // Identifiers
+        { "ISRC", "TSRC" },  // International Standard Recording Code
+        { "RADIOSTATION", "TRSN" },
+        { "RADIOSTATIONOWNER", "TRSO" },
+        
+        // Sorting and organization
+        { "ALBUMSORTORDER", "TSOA" },
+        { "PERFORMERSORTORDER", "TSOP" },
+        { "TITLESORTORDER", "TSOT" },
+        { "ALBUMARTISTSORT", "TSO2" },
+        { "COMPOSERSORT", "TSOC" },
+        
+        // File ownership and licensing
+        { "FILEOWNER", "TOWN" },
+        { "INTERNETRADIOSTATION", "TRSN" },
+        
+        // Set information (for multi-disc sets)
+        { "SETSUBTITLE", "TSST" },
+        
+        // Playlist delay
+        { "PLAYLISTDELAY", "TDLY" },
+    };
+
+    /// <summary>
+    /// Removes surrounding quotes from a string only if both ends have matching quotes.
+    /// This prevents accidental data loss from values that intentionally start or end with quotes.
+    /// </summary>
+    /// <param name="value">The string to process.</param>
+    /// <returns>The string with matching surrounding quotes removed, or the original string if no matching quotes.</returns>
+    private static string RemoveSurroundingQuotes(string value)
+    {
+        if (string.IsNullOrEmpty(value) || value.Length < 2)
+        {
+            return value;
+        }
+
+        // Check for matching double quotes
+        if (value.StartsWith("\"") && value.EndsWith("\""))
+        {
+            return value[1..^1];
+        }
+
+        // Check for matching single quotes
+        if (value.StartsWith("'") && value.EndsWith("'"))
+        {
+            return value[1..^1];
+        }
+
+        // No matching quotes, return as-is
+        return value;
+    }
+
+    /// <summary>
     /// Calculates the maximum concurrency level based on processor count.
     /// </summary>
     /// <returns>Max concurrency: 1 if ProcessorCount &lt;= 3, otherwise ProcessorCount - 3, capped at 32.</returns>
@@ -307,7 +411,7 @@ public class MusicTagService(
                 "LANGUAGE" => ExtractId3v2TextFrame(file, "TLAN"),
                 
                 // Try to extract from different tag types based on tag name format
-                _ => ExtractCustomTag(file, tagName)
+                _ => ExtractCustomTag(file, cleanTagName)
             };
         }
         catch (Exception ex)
@@ -378,8 +482,10 @@ public class MusicTagService(
                         {
                             if (!string.IsNullOrEmpty(text))
                             {
-                                values.Add(text);
-                                _logger.LogDebug("Frame '{FrameId}' contains value: '{Value}'", frameId, text);
+                                // Remove surrounding quotes only if both ends have matching quotes
+                                var cleanText = RemoveSurroundingQuotes(text);
+                                values.Add(cleanText);
+                                _logger.LogDebug("Frame '{FrameId}' contains value: '{Value}'", frameId, cleanText);
                             }
                         }
                     }
@@ -425,8 +531,9 @@ public class MusicTagService(
             var standardKey = file.Tag.InitialKey;
             if (!string.IsNullOrEmpty(standardKey))
             {
-                _logger.LogDebug("Found KEY in standard TagLib properties: '{Value}'", standardKey);
-                return standardKey;
+                var cleanKey = RemoveSurroundingQuotes(standardKey);
+                _logger.LogDebug("Found KEY in standard TagLib properties: '{Value}'", cleanKey);
+                return cleanKey;
             }
             
             if (file.GetTag(TagLib.TagTypes.Id3v2) is TagLib.Id3v2.Tag id3v2Tag)
@@ -452,8 +559,9 @@ public class MusicTagService(
                                 {
                                     if (!string.IsNullOrEmpty(text))
                                     {
-                                        _logger.LogDebug("Found TKEY frame with value: '{Value}'", text);
-                                        return text;
+                                        var cleanText = RemoveSurroundingQuotes(text);
+                                        _logger.LogDebug("Found TKEY frame with value: '{Value}'", cleanText);
+                                        return cleanText;
                                     }
                                 }
                             }
@@ -468,9 +576,10 @@ public class MusicTagService(
                                 {
                                     if (!string.IsNullOrEmpty(text))
                                     {
+                                        var cleanText = RemoveSurroundingQuotes(text);
                                         _logger.LogDebug("Found TXXX frame with key description '{Description}' and value: '{Value}'", 
-                                            userTextFrame.Description, text);
-                                        return text;
+                                            userTextFrame.Description, cleanText);
+                                        return cleanText;
                                     }
                                 }
                             }
@@ -512,6 +621,8 @@ public class MusicTagService(
 
     /// <summary>
     /// Extracts custom tags by trying different extraction methods based on tag name format.
+    /// Tries multiple sources: Vorbis comments (FLAC/OGG), TXXX frames (custom MP3 tags),
+    /// mapped standard frames (via dictionary), direct frame IDs, and generic extraction.
     /// </summary>
     /// <param name="file">The TagLib file.</param>
     /// <param name="tagName">The name of the tag to extract.</param>
@@ -520,29 +631,113 @@ public class MusicTagService(
     {
         try
         {
-            // First try Vorbis comments (for FLAC files, AB:MOOD tags, etc.)
+            // First try Vorbis comments (for FLAC, OGG, OPUS files)
+            // Custom tags and standard tags both work the same way in Vorbis
             var vorbisResult = ExtractVorbisComment(file, tagName);
             if (!string.IsNullOrEmpty(vorbisResult))
             {
                 return vorbisResult;
             }
 
-            // Only try ID3v2 frames if the tag name is exactly 4 characters (valid ID3v2 frame ID)
+            // Try TXXX frames (User Text Information) for custom tags in MP3/WAV files
+            // This is where MP3Tag stores custom tags that don't have standard frame IDs
+            var userTextResult = ExtractId3v2UserTextFrame(file, tagName);
+            if (!string.IsNullOrEmpty(userTextResult))
+            {
+                return userTextResult;
+            }
+
+            // Check if this tag name has a known ID3v2 frame mapping
+            // This allows friendly names like "FILETYPE" to map to standard frames like "TFLT"
+            if (TagNameToFrameId.TryGetValue(tagName, out var frameId))
+            {
+                var mappedResult = ExtractId3v2TextFrame(file, frameId);
+                if (!string.IsNullOrEmpty(mappedResult))
+                {
+                    return mappedResult;
+                }
+            }
+
+            // Try the tag name itself if it looks like an ID3v2 frame ID (4 characters)
+            // This allows users to use frame IDs directly (e.g., "TFLT", "TMOO")
+            // Ensure frame ID is uppercase as required by ID3v2 specification
             if (tagName.Length == 4 && tagName.All(char.IsLetterOrDigit))
             {
-                var id3Result = ExtractId3v2TextFrame(file, tagName);
+                var frameIdUpper = tagName.ToUpperInvariant();
+                var id3Result = ExtractId3v2TextFrame(file, frameIdUpper);
                 if (!string.IsNullOrEmpty(id3Result))
                 {
                     return id3Result;
                 }
             }
 
-            // Finally try generic extraction
+            // Finally try generic extraction via reflection
             return ExtractGenericTag(file, tagName);
         }
         catch (Exception ex)
         {
             _logger.LogDebug(ex, "Error extracting custom tag {TagName}", tagName);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Extracts a TXXX (User Text Information) frame from ID3v2 tags by description.
+    /// This is used for custom tags in MP3/WAV files that don't have standard frame IDs.
+    /// MP3Tag stores custom tags as TXXX frames with a description field matching the tag name.
+    /// </summary>
+    /// <param name="file">The TagLib file.</param>
+    /// <param name="description">The description of the TXXX frame to extract (case-insensitive).</param>
+    /// <returns>The frame text value(s) if found, multiple values combined with commas, otherwise null.</returns>
+    private string? ExtractId3v2UserTextFrame(TagLib.File file, string description)
+    {
+        try
+        {
+            if (file.GetTag(TagLib.TagTypes.Id3v2) is TagLib.Id3v2.Tag id3v2Tag)
+            {
+                var values = new List<string>();
+                
+                // Get all TXXX frames
+                var frames = id3v2Tag.GetFrames("TXXX");
+                
+                foreach (var frame in frames)
+                {
+                    if (frame is TagLib.Id3v2.UserTextInformationFrame userTextFrame)
+                    {
+                        var frameDescription = userTextFrame.Description ?? string.Empty;
+                        
+                        // Some tagging applications include quotes in the description field
+                        // Remove surrounding quotes only if both ends have matching quotes
+                        var strippedDescription = RemoveSurroundingQuotes(frameDescription);
+                        
+                        // Check if the description matches (case-insensitive)
+                        if (string.Equals(frameDescription, description, StringComparison.OrdinalIgnoreCase) ||
+                            string.Equals(strippedDescription, description, StringComparison.OrdinalIgnoreCase))
+                        {
+                            // UserTextInformationFrame can contain multiple text values
+                            foreach (var text in userTextFrame.Text)
+                            {
+                                if (!string.IsNullOrEmpty(text))
+                                {
+                                    // Remove surrounding quotes only if both ends have matching quotes
+                                    var cleanText = RemoveSurroundingQuotes(text);
+                                    values.Add(cleanText);
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                if (values.Count > 0)
+                {
+                    return string.Join(",", values.Distinct());
+                }
+            }
+            return null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error extracting TXXX frame with description {Description}", description);
             return null;
         }
     }
@@ -1056,8 +1251,10 @@ public class MusicTagService(
                     {
                         if (!string.IsNullOrEmpty(value))
                         {
-                            values.Add(value);
-                            _logger.LogDebug("Vorbis comment '{TagName}' contains value: '{Value}'", tagName, value);
+                            // Remove surrounding quotes only if both ends have matching quotes
+                            var cleanValue = RemoveSurroundingQuotes(value);
+                            values.Add(cleanValue);
+                            _logger.LogDebug("Vorbis comment '{TagName}' contains value: '{Value}'", tagName, cleanValue);
                         }
                     }
                 }
