@@ -99,6 +99,35 @@ public class MusicTagService(
     };
 
     /// <summary>
+    /// Removes surrounding quotes from a string only if both ends have matching quotes.
+    /// This prevents accidental data loss from values that intentionally start or end with quotes.
+    /// </summary>
+    /// <param name="value">The string to process.</param>
+    /// <returns>The string with matching surrounding quotes removed, or the original string if no matching quotes.</returns>
+    private static string RemoveSurroundingQuotes(string value)
+    {
+        if (string.IsNullOrEmpty(value) || value.Length < 2)
+        {
+            return value;
+        }
+
+        // Check for matching double quotes
+        if (value.StartsWith("\"") && value.EndsWith("\""))
+        {
+            return value.Substring(1, value.Length - 2);
+        }
+
+        // Check for matching single quotes
+        if (value.StartsWith("'") && value.EndsWith("'"))
+        {
+            return value.Substring(1, value.Length - 2);
+        }
+
+        // No matching quotes, return as-is
+        return value;
+    }
+
+    /// <summary>
     /// Calculates the maximum concurrency level based on processor count.
     /// </summary>
     /// <returns>Max concurrency: 1 if ProcessorCount &lt;= 3, otherwise ProcessorCount - 3, capped at 32.</returns>
@@ -379,7 +408,7 @@ public class MusicTagService(
                 "LANGUAGE" => ExtractId3v2TextFrame(file, "TLAN"),
                 
                 // Try to extract from different tag types based on tag name format
-                _ => ExtractCustomTag(file, tagName)
+                _ => ExtractCustomTag(file, cleanTagName)
             };
         }
         catch (Exception ex)
@@ -450,8 +479,8 @@ public class MusicTagService(
                         {
                             if (!string.IsNullOrEmpty(text))
                             {
-                                // Strip quotes from the value if present (some tagging apps include them)
-                                var cleanText = text.Trim('"', '\'');
+                                // Remove surrounding quotes only if both ends have matching quotes
+                                var cleanText = RemoveSurroundingQuotes(text);
                                 values.Add(cleanText);
                                 _logger.LogDebug("Frame '{FrameId}' contains value: '{Value}'", frameId, cleanText);
                             }
@@ -499,8 +528,9 @@ public class MusicTagService(
             var standardKey = file.Tag.InitialKey;
             if (!string.IsNullOrEmpty(standardKey))
             {
-                _logger.LogDebug("Found KEY in standard TagLib properties: '{Value}'", standardKey);
-                return standardKey;
+                var cleanKey = RemoveSurroundingQuotes(standardKey);
+                _logger.LogDebug("Found KEY in standard TagLib properties: '{Value}'", cleanKey);
+                return cleanKey;
             }
             
             if (file.GetTag(TagLib.TagTypes.Id3v2) is TagLib.Id3v2.Tag id3v2Tag)
@@ -526,8 +556,9 @@ public class MusicTagService(
                                 {
                                     if (!string.IsNullOrEmpty(text))
                                     {
-                                        _logger.LogDebug("Found TKEY frame with value: '{Value}'", text);
-                                        return text;
+                                        var cleanText = RemoveSurroundingQuotes(text);
+                                        _logger.LogDebug("Found TKEY frame with value: '{Value}'", cleanText);
+                                        return cleanText;
                                     }
                                 }
                             }
@@ -542,9 +573,10 @@ public class MusicTagService(
                                 {
                                     if (!string.IsNullOrEmpty(text))
                                     {
+                                        var cleanText = RemoveSurroundingQuotes(text);
                                         _logger.LogDebug("Found TXXX frame with key description '{Description}' and value: '{Value}'", 
-                                            userTextFrame.Description, text);
-                                        return text;
+                                            userTextFrame.Description, cleanText);
+                                        return cleanText;
                                     }
                                 }
                             }
@@ -625,9 +657,11 @@ public class MusicTagService(
 
             // Try the tag name itself if it looks like an ID3v2 frame ID (4 characters)
             // This allows users to use frame IDs directly (e.g., "TFLT", "TMOO")
+            // Ensure frame ID is uppercase as required by ID3v2 specification
             if (tagName.Length == 4 && tagName.All(char.IsLetterOrDigit))
             {
-                var id3Result = ExtractId3v2TextFrame(file, tagName);
+                var frameIdUpper = tagName.ToUpperInvariant();
+                var id3Result = ExtractId3v2TextFrame(file, frameIdUpper);
                 if (!string.IsNullOrEmpty(id3Result))
                 {
                     return id3Result;
@@ -670,8 +704,8 @@ public class MusicTagService(
                         var frameDescription = userTextFrame.Description ?? string.Empty;
                         
                         // Some tagging applications include quotes in the description field
-                        // Try matching with and without quotes
-                        var strippedDescription = frameDescription.Trim('"', '\'');
+                        // Remove surrounding quotes only if both ends have matching quotes
+                        var strippedDescription = RemoveSurroundingQuotes(frameDescription);
                         
                         // Check if the description matches (case-insensitive)
                         if (string.Equals(frameDescription, description, StringComparison.OrdinalIgnoreCase) ||
@@ -682,8 +716,8 @@ public class MusicTagService(
                             {
                                 if (!string.IsNullOrEmpty(text))
                                 {
-                                    // Strip quotes from the value if present
-                                    var cleanText = text.Trim('"', '\'');
+                                    // Remove surrounding quotes only if both ends have matching quotes
+                                    var cleanText = RemoveSurroundingQuotes(text);
                                     values.Add(cleanText);
                                 }
                             }
@@ -1214,8 +1248,8 @@ public class MusicTagService(
                     {
                         if (!string.IsNullOrEmpty(value))
                         {
-                            // Strip quotes from the value if present (some tagging apps include them)
-                            var cleanValue = value.Trim('"', '\'');
+                            // Remove surrounding quotes only if both ends have matching quotes
+                            var cleanValue = RemoveSurroundingQuotes(value);
                             values.Add(cleanValue);
                             _logger.LogDebug("Vorbis comment '{TagName}' contains value: '{Value}'", tagName, cleanValue);
                         }
