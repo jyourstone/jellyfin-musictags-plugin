@@ -40,9 +40,10 @@ MusicTags features a modern web-based configuration interface through the plugin
 The configuration page allows you to:
 
 1. **Tag Names to Extract**: Specify which tags to extract from your audio files
-   - Comma-separated list of tag names (e.g., "BPM,KEY")
-   - Supports standard ID3 tags, custom frames, and Vorbis comments
-   - Tags are added to Jellyfin in the format "TagName:Value" (e.g., "BPM:141")
+   - Comma-separated list of tag names (e.g., "GENRE,BPM,MOOD,KEY")
+   - Supports standard ID3 tags (GENRE, MOOD), custom frames, and Vorbis comments
+   - Also supports AcousticBrainz tags if you use MusicBrainz Picard (e.g., "AB:GENRE,AB:MOOD")
+   - Tags are added to Jellyfin in the format "TagName:Value" (e.g., "GENRE:Rock", "BPM:141")
 
 2. **Tag Value Delimiters**: Split multi-value tags into separate tags
    - Enter delimiter characters (e.g., `/|;\` for slash, pipe, semicolon, and backslash)
@@ -73,8 +74,9 @@ The plugin supports extraction from multiple audio metadata formats:
 - Any 4-character frame ID (e.g., TXXX frames)
 
 #### **Vorbis Comments (FLAC/OGG)**
-- AB:GENRE, AB:MOOD, or any custom field name
-- Standard Vorbis comment fields
+- `GENRE`, `MOOD`, or any custom field name
+- AcousticBrainz tags: `AB:GENRE`, `AB:MOOD` (commonly used with MusicBrainz Picard)
+- **Note**: The `AB:` prefix refers to AcousticBrainz metadata. You can use either `GENRE` or `AB:GENRE` depending on how your files are tagged.
 
 #### **Dynamic Extraction**
 - The plugin will attempt to extract any tag name you specify!
@@ -93,10 +95,11 @@ Download the latest release from the [Releases page](https://github.com/jyoursto
 
 ## Usage Examples
 
-### Example 1: Extract BPM and KEY Tags
-Configure the plugin to extract BPM and KEY information:
-- **Tag Names to Extract**: `BPM,KEY`
-- This will add tags like "BPM:141" and "KEY:D" to your music
+### Example 1: Extract Genre and Mood Tags
+Configure the plugin to extract genre and mood information from your audio files:
+- **Tag Names to Extract**: `GENRE,MOOD` (for standard tags) or `AB:GENRE,AB:MOOD` (for AcousticBrainz tags)
+- This will add tags like "GENRE:Rock", "GENRE:Electronic", "MOOD:energetic" to your music
+- **Note**: Use whichever tag names match your file metadata (check with a tag editor like MP3Tag or MusicBrainz Picard)
 
 ### Example 2: Split Multi-Genre Tags
 If your audio files contain multiple genres separated by delimiters:
@@ -108,7 +111,13 @@ If your audio files contain multiple genres separated by delimiters:
 - This enables Jellyfin's instant mix to pull from either genre catalog
 - Perfect for parental control filtering by individual genres
 
-### Example 3: Enable Parental Controls with Tag Propagation
+### Example 3: Extract Technical Music Information
+For DJ mixing or music production analysis:
+- **Tag Names to Extract**: `BPM,KEY`
+- This will add tags like "BPM:128", "KEY:Am" to your tracks
+- Great for creating smart playlists based on tempo or harmonic mixing
+
+### Example 4: Enable Parental Controls with Tag Propagation
 For parental control filtering to work at album/artist level:
 - **Tag Names to Extract**: `GENRE`
 - **Propagate Tags to Parent Albums and Artists**: ✅ Enabled
@@ -117,7 +126,7 @@ For parental control filtering to work at album/artist level:
 - **Example**: If all songs in an album have `GENRE:Rock`, the album will also get `GENRE:Rock`. If you block Rock for a user, they won't see the album at all.
 - **Note**: Propagation adds tags to parents but doesn't remove them. To clean up parent tags after removing song tags, run Tag Cleanup with "Also remove from albums and artists" enabled.
 
-### Example 4: Clean Up Old Tags
+### Example 5: Clean Up Old Tags
 Remove unwanted tags from your library:
 - **Tag Names to Remove**: `BPM`
 - This will remove all instances of these tags from your Jellyfin music library
@@ -129,9 +138,9 @@ MusicTags works exceptionally well with the **[SmartPlaylist Plugin](https://git
 ### SmartPlaylist Integration Examples
 
 - **High-Energy Workout Mix**: Create a playlist with `BPM` tags between 130-150 (filter by tags and use this regex: `\bBPM:(13[0-9]|14[0-9]|150)\b`)
-- **Chill Vibes**: Filter by `AB:MOOD` tags like "chill", "relaxing", or "ambient"
+- **Chill Vibes**: Filter by `MOOD` or `AB:MOOD` tags like "chill", "relaxing", or "ambient"
 - **Key-Based Playlists**: Group songs by musical key using extracted `KEY` tags
-- **Complex Combinations**: Combine multiple audio tags (e.g., "BPM:140-160" AND "AB:MOOD:energetic")
+- **Complex Combinations**: Combine multiple audio tags (e.g., "BPM:140-160" AND "MOOD:energetic")
 
 This powerful combination allows you to leverage the rich metadata embedded in your audio files to create sophisticated, automatically-updating playlists that reflect the actual musical characteristics of your music!
 
@@ -153,16 +162,18 @@ For local development, see the [dev folder](https://github.com/jyourstone/jellyf
 - Extract: `BPM`
 - Result: Adds "BPM:141" tags to tracks with tempo information
 
-#### **Custom Genre Tags**
-- Extract: `AB:GENRE`
-- Result: Adds "AB:GENRE:Rock" tags from Vorbis comments
+#### **Genre Tags**
+- Extract: `GENRE` (standard tag) or `AB:GENRE` (AcousticBrainz tag)
+- Result: Adds "GENRE:Rock" or "AB:GENRE:Rock" tags depending on which tag exists in your files
+- **Note**: Use `GENRE` for standard ID3/Vorbis tags, or `AB:GENRE` if you use MusicBrainz Picard with AcousticBrainz plugins
 
 #### **Mood Information**
-- Extract: `AB:MOOD`
-- Result: Adds "AB:MOOD:energetic" tags for mood classification
+- Extract: `MOOD` (standard tag) or `AB:MOOD` (AcousticBrainz tag)
+- Result: Adds "MOOD:energetic" or "AB:MOOD:energetic" tags for mood classification
+- **Note**: Both work identically; choose based on how your files are tagged
 
 #### **Key Information**
-- Extract: `KEY` (ID3v2 key frame)
+- Extract: `KEY`
 - Result: Adds "KEY:C" tags for musical key information
 
 ### File Format Support
