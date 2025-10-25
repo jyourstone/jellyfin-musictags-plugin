@@ -82,6 +82,33 @@ The plugin supports extraction from multiple audio metadata formats:
 - The plugin will attempt to extract any tag name you specify!
 - Works with most audio formats that support metadata
 
+### Audio Format Support
+
+The plugin supports different levels of tag extraction depending on the audio format:
+
+#### ✅ **Full Custom Tag Support**
+These formats support extraction of **any custom tag** you define:
+
+- **MP3** - Standard ID3v2 frames and custom TXXX frames
+- **WAV** - Standard ID3v2 frames and custom TXXX frames (when ID3v2 tags are present)
+- **FLAC** - Vorbis comments (any custom field name)
+- **OGG** - Vorbis comments (any custom field name)
+- **OPUS** - Vorbis comments (any custom field name)
+- **WMA** - ASF tags (any custom field name)
+
+**Example**: You can extract `FILETYPE`, `MOOD`, `LANGUAGE`, `KEY`, `BPM`, or any other custom tag you've added using tools like MP3Tag or MusicBrainz Picard.
+
+#### ⚠️ **Standard Tags Only**
+These formats only support extraction of **standard/predefined tags**:
+
+- **M4A/MP4/AAC** - Standard iTunes metadata tags only (Artist, Album, Genre, Year, Title, etc.)
+
+**M4A Limitation**: Due to limitations in the TagLib-Sharp library (v2.3.0), the plugin cannot access custom tags stored in M4A files by applications like MP3Tag. Only standard iTunes metadata fields are supported. If you need custom tag support, consider using FLAC (lossless) or MP3 (lossy) for those files.
+
+#### 📋 **Standard Tags Available in All Formats**
+All supported formats can extract these standard metadata fields:
+- Artist, Album, Genre, Year, Title, Composer, BPM, Publisher, Copyright, Comment
+
 ## How to Install
 
 ### From Repository
@@ -178,13 +205,7 @@ For local development, see the [dev folder](https://github.com/jyourstone/jellyf
 
 ### File Format Support
 
-The plugin supports tag extraction from:
-- **MP3** - ID3v1 and ID3v2 tags
-- **FLAC** - Vorbis comments and ID3v2 tags
-- **OGG** - Vorbis comments
-- **M4A** - iTunes-style metadata
-- **WAV** - ID3v2 tags (when present)
-- **Other formats** - Any format supported by the underlying audio library
+See the **[Audio Format Support](#audio-format-support)** section above for detailed information about which formats support custom tags vs. standard tags only.
 
 ### Performance Considerations
 

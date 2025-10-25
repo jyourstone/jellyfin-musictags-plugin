@@ -442,7 +442,10 @@ public class MusicTagService(
                 if (value != null)
                 {
                     var stringValue = value.ToString();
-                    return !string.IsNullOrEmpty(stringValue) ? stringValue : null;
+                    if (!string.IsNullOrEmpty(stringValue))
+                    {
+                        return RemoveSurroundingQuotes(stringValue);
+                    }
                 }
             }
             
@@ -621,8 +624,9 @@ public class MusicTagService(
 
     /// <summary>
     /// Extracts custom tags by trying different extraction methods based on tag name format.
-    /// Tries multiple sources: Vorbis comments (FLAC/OGG), TXXX frames (custom MP3 tags),
-    /// mapped standard frames (via dictionary), direct frame IDs, and generic extraction.
+    /// Tries multiple sources: Vorbis comments (FLAC/OGG), Apple/iTunes tags (M4A/MP4),
+    /// ASF tags (WMA), TXXX frames (custom MP3 tags), mapped standard frames (via dictionary),
+    /// direct frame IDs, and generic extraction.
     /// </summary>
     /// <param name="file">The TagLib file.</param>
     /// <param name="tagName">The name of the tag to extract.</param>
@@ -637,6 +641,20 @@ public class MusicTagService(
             if (!string.IsNullOrEmpty(vorbisResult))
             {
                 return vorbisResult;
+            }
+
+            // Try Apple/iTunes tags (for M4A, MP4, AAC files)
+            var appleResult = ExtractAppleTag(file, tagName);
+            if (!string.IsNullOrEmpty(appleResult))
+            {
+                return appleResult;
+            }
+
+            // Try ASF tags (for WMA files)
+            var asfResult = ExtractAsfTag(file, tagName);
+            if (!string.IsNullOrEmpty(asfResult))
+            {
+                return asfResult;
             }
 
             // Try TXXX frames (User Text Information) for custom tags in MP3/WAV files
@@ -677,6 +695,147 @@ public class MusicTagService(
         catch (Exception ex)
         {
             _logger.LogDebug(ex, "Error extracting custom tag {TagName}", tagName);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Extracts a tag from Apple/iTunes tags (used by M4A, MP4, AAC files).
+    /// </summary>
+    /// <param name="file">The TagLib file.</param>
+    /// <param name="tagName">The name of the tag to extract.</param>
+    /// <returns>The tag value if found, otherwise null.</returns>
+    private string? ExtractAppleTag(TagLib.File file, string tagName)
+    {
+        try
+        {
+            // Check if the file supports Apple tags (M4A, MP4, AAC, etc.)
+            if (file.GetTag(TagLib.TagTypes.Apple) is TagLib.Mpeg4.AppleTag appleTag)
+            {
+                var values = new List<string>();
+                
+                // Try to get the field by name via DataBoxes
+                var dataBoxes = appleTag.DataBoxes(tagName);
+                if (dataBoxes != null)
+                {
+                    foreach (var box in dataBoxes)
+                    {
+                        if (box != null)
+                        {
+                            var text = box.Text;
+                            if (!string.IsNullOrEmpty(text))
+                            {
+                                var cleanValue = RemoveSurroundingQuotes(text);
+                                values.Add(cleanValue);
+                                _logger.LogDebug("Apple tag '{TagName}' contains value: '{Value}'", tagName, cleanValue);
+                            }
+                        }
+                    }
+                }
+                
+                if (values.Count > 0)
+                {
+                    var result = string.Join(",", values.Distinct());
+                    _logger.LogDebug("Combined Apple tag result for '{TagName}': '{Result}'", tagName, result);
+                    return result;
+                }
+                
+                // Try common Apple freeform tag format (used by some tagging applications)
+                var freeformKey = $"----:com.apple.iTunes:{tagName}";
+                var freeformBoxes = appleTag.DataBoxes(freeformKey);
+                if (freeformBoxes != null && freeformBoxes.Any())
+                {
+                    foreach (var box in freeformBoxes)
+                    {
+                        if (box != null)
+                        {
+                            var text = box.Text;
+                            if (!string.IsNullOrEmpty(text))
+                            {
+                                var cleanValue = RemoveSurroundingQuotes(text);
+                                values.Add(cleanValue);
+                                _logger.LogDebug("Apple freeform tag '{Key}' contains value: '{Value}'", freeformKey, cleanValue);
+                            }
+                        }
+                    }
+                }
+                
+                if (values.Count > 0)
+                {
+                    var result = string.Join(",", values.Distinct());
+                    _logger.LogDebug("Combined Apple freeform tag result for '{TagName}': '{Result}'", tagName, result);
+                    return result;
+                }
+            }
+            else
+            {
+                _logger.LogDebug("No Apple tags found in file");
+            }
+            
+            return null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error extracting Apple tag {TagName}", tagName);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Extracts a tag from ASF tags (used by WMA files).
+    /// </summary>
+    /// <param name="file">The TagLib file.</param>
+    /// <param name="tagName">The name of the tag to extract.</param>
+    /// <returns>The tag value if found, otherwise null.</returns>
+    private string? ExtractAsfTag(TagLib.File file, string tagName)
+    {
+        try
+        {
+            // Check if the file supports ASF tags (WMA files)
+            if (file.GetTag(TagLib.TagTypes.Asf) is TagLib.Asf.Tag asfTag)
+            {
+                var values = new List<string>();
+                
+                // Try to get the attribute value
+                var descriptors = asfTag.GetDescriptors(tagName);
+                if (descriptors != null && descriptors.Any())
+                {
+                    foreach (var descriptor in descriptors)
+                    {
+                        if (descriptor != null)
+                        {
+                            var text = descriptor.ToString();
+                            if (text != null && !string.IsNullOrEmpty(text))
+                            {
+                                var cleanValue = RemoveSurroundingQuotes(text);
+                                values.Add(cleanValue);
+                                _logger.LogDebug("ASF tag '{TagName}' contains value: '{Value}'", tagName, cleanValue);
+                            }
+                        }
+                    }
+                }
+                
+                if (values.Count > 0)
+                {
+                    var result = string.Join(",", values.Distinct());
+                    _logger.LogDebug("Combined ASF tag result for '{TagName}': '{Result}'", tagName, result);
+                    return result;
+                }
+                else
+                {
+                    _logger.LogDebug("No ASF tag found for '{TagName}'", tagName);
+                }
+            }
+            else
+            {
+                _logger.LogDebug("No ASF tags found in file");
+            }
+            
+            return null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error extracting ASF tag {TagName}", tagName);
             return null;
         }
     }
