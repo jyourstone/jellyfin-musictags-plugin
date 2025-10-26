@@ -740,21 +740,41 @@ public class MusicTagService(
                     return result;
                 }
                 
-                // Try common Apple freeform tag format (used by some tagging applications)
-                var freeformKey = $"----:com.apple.iTunes:{tagName}";
-                var freeformBoxes = appleTag.DataBoxes(freeformKey);
-                if (freeformBoxes != null && freeformBoxes.Any())
+                // Try using GetDashBox (the official API for freeform iTunes tags)
+                try
                 {
-                    foreach (var box in freeformBoxes)
+                    var dashBoxValue = appleTag.GetDashBox("com.apple.iTunes", tagName);
+                    if (!string.IsNullOrEmpty(dashBoxValue))
                     {
-                        if (box != null)
+                        // GetDashBox returns a single string
+                        var cleanValue = RemoveSurroundingQuotes(dashBoxValue);
+                        values.Add(cleanValue);
+                        _logger.LogDebug("Apple GetDashBox for '{TagName}' returned: '{Value}'", tagName, cleanValue);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "GetDashBox failed for '{TagName}'", tagName);
+                }
+                
+                // Also try the DataBoxes approach with freeform key format
+                if (values.Count == 0)
+                {
+                    var freeformKey = $"----:com.apple.iTunes:{tagName}";
+                    var freeformBoxes = appleTag.DataBoxes(freeformKey);
+                    if (freeformBoxes != null && freeformBoxes.Any())
+                    {
+                        foreach (var box in freeformBoxes)
                         {
-                            var text = box.Text;
-                            if (!string.IsNullOrEmpty(text))
+                            if (box != null)
                             {
-                                var cleanValue = RemoveSurroundingQuotes(text);
-                                values.Add(cleanValue);
-                                _logger.LogDebug("Apple freeform tag '{Key}' contains value: '{Value}'", freeformKey, cleanValue);
+                                var text = box.Text;
+                                if (!string.IsNullOrEmpty(text))
+                                {
+                                    var cleanValue = RemoveSurroundingQuotes(text);
+                                    values.Add(cleanValue);
+                                    _logger.LogDebug("Apple freeform DataBox '{Key}' contains value: '{Value}'", freeformKey, cleanValue);
+                                }
                             }
                         }
                     }
@@ -1444,7 +1464,8 @@ public class MusicTagService(
     }
 
     /// <summary>
-    /// Lists all available ID3v2 frames and Vorbis comments in the file for debugging purposes.
+    /// Lists all available tags in the file for debugging purposes.
+    /// Enumerates ID3v2 frames, Vorbis comments, Apple/iTunes atoms, and ASF descriptors.
     /// </summary>
     /// <param name="file">The TagLib file.</param>
     private void ListAvailableTags(TagLib.File file)
@@ -1500,6 +1521,94 @@ public class MusicTagService(
             else
             {
                 _logger.LogDebug("No Vorbis comments found");
+            }
+            
+            // List Apple/iTunes tags (M4A, MP4, AAC)
+            if (file.GetTag(TagLib.TagTypes.Apple) is TagLib.Mpeg4.AppleTag appleTag)
+            {
+                _logger.LogDebug("Apple tags found - attempting to enumerate available data boxes");
+                
+                try
+                {
+                    // Try to enumerate common Apple tag atoms
+                    var commonAtoms = new[] { 
+                        "©nam", "©ART", "©alb", "©gen", "©day", "©cmt", "©wrt", 
+                        "trkn", "disk", "cpil", "tmpo", "covr", "aART", "©grp",
+                        "----:com.apple.iTunes:FILETYPE", "----:com.apple.iTunes:LANGUAGE",
+                        "----:com.apple.iTunes:MOOD", "----:com.apple.iTunes:KEY"
+                    };
+                    
+                    var foundAtoms = new List<string>();
+                    foreach (var atom in commonAtoms)
+                    {
+                        var boxes = appleTag.DataBoxes(atom);
+                        if (boxes != null && boxes.Any())
+                        {
+                            foundAtoms.Add(atom);
+                        }
+                    }
+                    
+                    if (foundAtoms.Count > 0)
+                    {
+                        _logger.LogDebug("Found Apple atoms: [{Atoms}]", string.Join(", ", foundAtoms));
+                    }
+                    else
+                    {
+                        _logger.LogDebug("No common Apple atoms found via DataBoxes enumeration");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Error enumerating Apple data boxes");
+                }
+            }
+            else
+            {
+                _logger.LogDebug("No Apple tags found");
+            }
+            
+            // List ASF tags (WMA)
+            if (file.GetTag(TagLib.TagTypes.Asf) is TagLib.Asf.Tag asfTag)
+            {
+                _logger.LogDebug("ASF tags found - attempting to enumerate available descriptors");
+                
+                try
+                {
+                    // Try to enumerate common ASF descriptor names
+                    var commonDescriptors = new[] { 
+                        "Title", "Author", "Copyright", "Description", "Rating",
+                        "WM/AlbumTitle", "WM/AlbumArtist", "WM/Genre", "WM/Year",
+                        "WM/TrackNumber", "WM/PartOfSet", "WM/BeatsPerMinute",
+                        "FILETYPE", "LANGUAGE", "MOOD", "KEY"
+                    };
+                    
+                    var foundDescriptors = new List<string>();
+                    foreach (var descriptor in commonDescriptors)
+                    {
+                        var values = asfTag.GetDescriptors(descriptor);
+                        if (values != null && values.Any())
+                        {
+                            foundDescriptors.Add(descriptor);
+                        }
+                    }
+                    
+                    if (foundDescriptors.Count > 0)
+                    {
+                        _logger.LogDebug("Found ASF descriptors: [{Descriptors}]", string.Join(", ", foundDescriptors));
+                    }
+                    else
+                    {
+                        _logger.LogDebug("No common ASF descriptors found");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Error enumerating ASF descriptors");
+                }
+            }
+            else
+            {
+                _logger.LogDebug("No ASF tags found");
             }
         }
         catch (Exception ex)
