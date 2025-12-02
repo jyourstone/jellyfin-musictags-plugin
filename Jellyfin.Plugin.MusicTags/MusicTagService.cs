@@ -233,10 +233,10 @@ public class MusicTagService(
         }
 
         return value
-            .Replace("\"", "").Replace("'", "")           // Regular quotes
-            .Replace(""", "").Replace(""", "")           // Left/right double quotes
-            .Replace("'", "").Replace("'", "")             // Left/right single quotes
-            .Replace("«", "").Replace("»", "")            // Guillemets
+            .Replace("\"", "").Replace("'", "")           // Regular quotes: U+0022, U+0027
+            .Replace(""", "").Replace(""", "")           // Curly double quotes: U+201C, U+201D
+            .Replace("'", "").Replace("'", "")             // Curly single quotes: U+2018, U+2019
+            .Replace("«", "").Replace("»", "")            // Guillemets: U+00AB, U+00BB
             .Trim();
     }
 
@@ -776,18 +776,18 @@ public class MusicTagService(
                 _logger.LogDebug("CONTENTGROUP detected - trying both direct name and mapped atom");
                 
                 // First try with the cleaned name directly (CONTENTGROUP) - MP3Tag shows it this way
-                var appleResult = ExtractAppleTag(file, cleanTagName);
+                var appleResult = ExtractAppleTag(file, cleanTagName, originalFriendlyName: cleanTagName);
                 if (!string.IsNullOrEmpty(appleResult))
                 {
                     _logger.LogInformation("Found CONTENTGROUP using direct name '{CleanTagName}'", cleanTagName);
                     return appleResult;
                 }
                 
-                // Then try with the mapped atom (©grp)
+                // Then try with the mapped atom (©grp), but pass the original friendly name for dash-box lookups
                 if (TagNameToAppleAtom.TryGetValue(cleanTagName, out var mappedAtom))
                 {
                     _logger.LogDebug("Trying mapped atom '{MappedAtom}' for CONTENTGROUP", mappedAtom);
-                    appleResult = ExtractAppleTag(file, mappedAtom);
+                    appleResult = ExtractAppleTag(file, mappedAtom, originalFriendlyName: cleanTagName);
                     if (!string.IsNullOrEmpty(appleResult))
                     {
                         _logger.LogInformation("Found CONTENTGROUP using mapped atom '{MappedAtom}'", mappedAtom);
@@ -805,7 +805,8 @@ public class MusicTagService(
                     _logger.LogDebug("Mapped tag name '{TagName}' to Apple atom '{AtomName}'", cleanTagName, atomName);
                 }
                 
-                var appleResult = ExtractAppleTag(file, atomName);
+                // Pass the original friendly name for dash-box lookups
+                var appleResult = ExtractAppleTag(file, atomName, originalFriendlyName: cleanTagName);
                 if (!string.IsNullOrEmpty(appleResult))
                 {
                     return appleResult;
@@ -875,18 +876,30 @@ public class MusicTagService(
     /// For other tags, uses standard DataBoxes API to access atoms by name.
     /// </summary>
     /// <param name="file">The TagLib file.</param>
-    /// <param name="tagName">The name of the tag to extract.</param>
+    /// <param name="tagName">The name of the tag to extract (may be a friendly name or atom name).</param>
+    /// <param name="originalFriendlyName">Optional original friendly name for dash-box lookups. If null, tagName is used.</param>
     /// <returns>The tag value if found, otherwise null.</returns>
-    private string? ExtractAppleTag(TagLib.File file, string tagName)
+    private string? ExtractAppleTag(TagLib.File file, string tagName, string? originalFriendlyName = null)
     {
         try
         {
             // Clean the tag name to remove any quotes
             var cleanTagName = StripAllQuotes(tagName);
             
+            // Determine the original friendly name for dash-box lookups
+            // If originalFriendlyName is provided, use it; otherwise use cleanTagName
+            // This ensures dash-box lookups use the friendly name (e.g., "BPM") even when
+            // the method is called with the mapped atom (e.g., "tmpo")
+            var friendlyNameForDashBox = originalFriendlyName != null 
+                ? StripAllQuotes(originalFriendlyName) 
+                : cleanTagName;
+            
             // Check if the file supports Apple tags (M4A, MP4, AAC, etc.)
             if (file.GetTag(TagLib.TagTypes.Apple) is TagLib.Mpeg4.AppleTag appleTag)
             {
+                _logger.LogDebug("Extracting Apple tag: '{TagName}' (cleaned: '{CleanTagName}', friendly: '{FriendlyName}')", 
+                    tagName, cleanTagName, friendlyNameForDashBox);
+                
                 // Special handling for CONTENTGROUP: Use TagLib's Grouping property
                 if (cleanTagName.Equals("CONTENTGROUP", StringComparison.OrdinalIgnoreCase) ||
                     cleanTagName.Equals("©GRP", StringComparison.OrdinalIgnoreCase))
@@ -895,30 +908,56 @@ public class MusicTagService(
                     {
                         // Try to access Grouping property via reflection on the Tag object
                         var tagType = file.Tag.GetType();
+                        _logger.LogDebug("Exploring tag type: {TagType}", tagType.Name);
+                        
                         var groupingProperty = tagType.GetProperty("Grouping", 
                             System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.IgnoreCase);
                         
                         if (groupingProperty != null)
                         {
+                            _logger.LogDebug("Found Grouping property on tag type: {PropertyType}", groupingProperty.PropertyType.Name);
                             var groupingValue = groupingProperty.GetValue(file.Tag);
                             if (groupingValue != null && !string.IsNullOrEmpty(groupingValue.ToString()))
                             {
+                                _logger.LogDebug("Retrieved Grouping value: '{Value}' (type: {Type})", 
+                                    groupingValue.ToString(), groupingValue.GetType().Name);
                                 return RemoveSurroundingQuotes(groupingValue.ToString()!);
                             }
+                            else
+                            {
+                                _logger.LogDebug("Grouping property returned null or empty value");
+                            }
+                        }
+                        else
+                        {
+                            _logger.LogDebug("Grouping property not found on tag type {TagType}", tagType.Name);
                         }
                         
                         // Fallback: Try on AppleTag directly
                         var appleTagType = appleTag.GetType();
+                        _logger.LogDebug("Exploring AppleTag type: {AppleTagType}", appleTagType.Name);
+                        
                         var appleGroupingProperty = appleTagType.GetProperty("Grouping", 
                             System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.IgnoreCase);
                         
                         if (appleGroupingProperty != null)
                         {
+                            _logger.LogDebug("Found Grouping property on AppleTag type: {PropertyType}", appleGroupingProperty.PropertyType.Name);
                             var appleGroupingValue = appleGroupingProperty.GetValue(appleTag);
                             if (appleGroupingValue != null && !string.IsNullOrEmpty(appleGroupingValue.ToString()))
                             {
+                                _logger.LogDebug("Retrieved AppleTag Grouping value: '{Value}' (type: {Type})", 
+                                    appleGroupingValue.ToString(), appleGroupingValue.GetType().Name);
                                 return RemoveSurroundingQuotes(appleGroupingValue.ToString()!);
                             }
+                            else
+                            {
+                                _logger.LogDebug("AppleTag Grouping property returned null or empty value");
+                            }
+                        }
+                        else
+                        {
+                            _logger.LogDebug("Grouping property not found on AppleTag type {AppleTagType}", appleTagType.Name);
                         }
                     }
                     catch (Exception ex)
@@ -929,23 +968,43 @@ public class MusicTagService(
                 
                 // Map tag name to Apple atom name if needed
                 string atomName = cleanTagName;
+                string originalFriendlyNameBeforeMapping = cleanTagName;
                 if (TagNameToAppleAtom.TryGetValue(cleanTagName, out var mappedAtom))
                 {
                     atomName = mappedAtom;
+                    originalFriendlyNameBeforeMapping = cleanTagName; // Store the friendly name before mapping
+                    _logger.LogDebug("Mapped friendly name '{FriendlyName}' to Apple atom '{AtomName}'", 
+                        cleanTagName, atomName);
                 }
                 
                 // Try to get the atom via DataBoxes
+                _logger.LogDebug("Querying DataBoxes for atom '{AtomName}'", atomName);
                 var dataBoxes = appleTag.DataBoxes(atomName);
+                
+                if (dataBoxes != null)
+                {
+                    _logger.LogDebug("DataBoxes returned {Count} boxes for atom '{AtomName}'", dataBoxes.Count(), atomName);
+                }
+                else
+                {
+                    _logger.LogDebug("DataBoxes returned null for atom '{AtomName}'", atomName);
+                }
                 
                 if (dataBoxes != null && dataBoxes.Any())
                 {
                     var values = new List<string>();
                     bool isIntegerAtom = IntegerAtoms.Contains(atomName) || IntegerAtoms.Contains(cleanTagName);
                     
+                    _logger.LogDebug("Processing {Count} data boxes, isIntegerAtom: {IsIntegerAtom}", 
+                        dataBoxes.Count(), isIntegerAtom);
+                    
                     foreach (var box in dataBoxes)
                     {
                         if (box != null)
                         {
+                            var boxType = box.GetType().Name;
+                            _logger.LogDebug("Processing box type: {BoxType}", boxType);
+                            
                             // For integer atoms, parse binary data
                             if (isIntegerAtom && box.Data != null && box.Data.Count > 0)
                             {
@@ -955,24 +1014,36 @@ public class MusicTagService(
                                     var bytes = data.Data;
                                     var count = data.Count;
                                     
+                                    _logger.LogDebug("Integer atom data: count={Count}, bytes type={BytesType}", 
+                                        count, bytes.GetType().Name);
+                                    
+                                    // Use explicit slicing for defensive programming
+                                    // Convert to span and slice to the exact count needed, protecting against future TagLib changes
+                                    var span = bytes.AsSpan(0, Math.Min(count, bytes.Length));
+                                    
                                     if (count == 8)
                                     {
-                                        var value = BinaryPrimitives.ReadInt64BigEndian(bytes);
+                                        var value = BinaryPrimitives.ReadInt64BigEndian(span);
+                                        _logger.LogDebug("Parsed 64-bit integer: {Value}", value);
                                         values.Add(value.ToString(CultureInfo.InvariantCulture));
                                     }
                                     else if (count == 4)
                                     {
-                                        var value = BinaryPrimitives.ReadInt32BigEndian(bytes);
+                                        var value = BinaryPrimitives.ReadInt32BigEndian(span);
+                                        _logger.LogDebug("Parsed 32-bit integer: {Value}", value);
                                         values.Add(value.ToString(CultureInfo.InvariantCulture));
                                     }
                                     else if (count == 2)
                                     {
-                                        var value = BinaryPrimitives.ReadInt16BigEndian(bytes);
+                                        var value = BinaryPrimitives.ReadInt16BigEndian(span);
+                                        _logger.LogDebug("Parsed 16-bit integer: {Value}", value);
                                         values.Add(value.ToString(CultureInfo.InvariantCulture));
                                     }
                                     else if (count == 1)
                                     {
-                                        values.Add(data[0].ToString(CultureInfo.InvariantCulture));
+                                        var value = data[0];
+                                        _logger.LogDebug("Parsed 8-bit integer: {Value}", value);
+                                        values.Add(value.ToString(CultureInfo.InvariantCulture));
                                     }
                                     else
                                     {
@@ -990,7 +1061,12 @@ public class MusicTagService(
                                 var text = box.Text;
                                 if (!string.IsNullOrEmpty(text))
                                 {
+                                    _logger.LogDebug("Text atom value: '{Text}' (length: {Length})", text, text.Length);
                                     values.Add(RemoveSurroundingQuotes(text));
+                                }
+                                else
+                                {
+                                    _logger.LogDebug("Text property returned null or empty");
                                 }
                             }
                         }
@@ -998,22 +1074,41 @@ public class MusicTagService(
                     
                     if (values.Count > 0)
                     {
-                        return string.Join(",", values.Distinct());
+                        var result = string.Join(",", values.Distinct());
+                        _logger.LogDebug("Extracted {Count} values for atom '{AtomName}': '{Result}'", 
+                            values.Count, atomName, result);
+                        return result;
+                    }
+                    else
+                    {
+                        _logger.LogDebug("No values extracted from data boxes for atom '{AtomName}'", atomName);
                     }
                 }
+                else
+                {
+                    _logger.LogDebug("No data boxes found for atom '{AtomName}'", atomName);
+                }
                 
-                // Try GetDashBox for freeform iTunes tags
+                // Try GetDashBox for freeform iTunes tags using the original friendly name
+                // Dash boxes store tags with friendly names (e.g., "BPM"), not atom names (e.g., "tmpo")
                 try
                 {
-                    var dashBoxValue = appleTag.GetDashBox("com.apple.iTunes", cleanTagName);
+                    _logger.LogDebug("Trying GetDashBox with friendly name '{FriendlyName}'", friendlyNameForDashBox);
+                    var dashBoxValue = appleTag.GetDashBox("com.apple.iTunes", friendlyNameForDashBox);
                     if (!string.IsNullOrEmpty(dashBoxValue))
                     {
+                        _logger.LogDebug("Found dash-box value: '{Value}' for friendly name '{FriendlyName}'", 
+                            dashBoxValue, friendlyNameForDashBox);
                         return RemoveSurroundingQuotes(dashBoxValue);
+                    }
+                    else
+                    {
+                        _logger.LogDebug("GetDashBox returned null or empty for friendly name '{FriendlyName}'", friendlyNameForDashBox);
                     }
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogDebug(ex, "GetDashBox failed for '{TagName}'", tagName);
+                    _logger.LogDebug(ex, "GetDashBox failed for friendly name '{FriendlyName}'", friendlyNameForDashBox);
                 }
             }
             
