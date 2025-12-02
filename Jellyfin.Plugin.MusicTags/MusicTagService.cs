@@ -1,4 +1,5 @@
 using System;
+using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -179,6 +180,15 @@ public class MusicTagService(
         
         // Gapless playback
         { "GAPLESS", "pgap" },
+    };
+
+    /// <summary>
+    /// Known integer atoms that store binary data instead of text.
+    /// These atoms require special parsing to extract numeric values from binary data.
+    /// </summary>
+    private static readonly HashSet<string> IntegerAtoms = new(StringComparer.OrdinalIgnoreCase) 
+    { 
+        "plID", "tmpo", "rtng", "stik", "sfID", "cnID", "atID", "geID" 
     };
 
     /// <summary>
@@ -483,7 +493,7 @@ public class MusicTagService(
             var firstCharBytes = cleanTagName.Length > 0 ? BitConverter.ToString(System.Text.Encoding.UTF8.GetBytes(cleanTagName.Substring(0, 1))) : "N/A";
             var lastCharBytes = cleanTagName.Length > 0 ? BitConverter.ToString(System.Text.Encoding.UTF8.GetBytes(cleanTagName.Substring(cleanTagName.Length - 1, 1))) : "N/A";
             
-            _logger.LogInformation("Clean tag name: '{CleanTagName}' (length: {Length}, first char bytes: {FirstCharBytes}, last char bytes: {LastCharBytes})", 
+            _logger.LogDebug("Clean tag name: '{CleanTagName}' (length: {Length}, first char bytes: {FirstCharBytes}, last char bytes: {LastCharBytes})", 
                 cleanTagName, 
                 cleanTagName.Length,
                 firstCharBytes,
@@ -755,7 +765,7 @@ public class MusicTagService(
                 var appleResult = ExtractAppleTag(file, cleanTagName);
                 if (!string.IsNullOrEmpty(appleResult))
                 {
-                    _logger.LogInformation("✓ Found CONTENTGROUP using direct name '{CleanTagName}'", cleanTagName);
+                    _logger.LogInformation("Found CONTENTGROUP using direct name '{CleanTagName}'", cleanTagName);
                     return appleResult;
                 }
                 
@@ -766,7 +776,7 @@ public class MusicTagService(
                     appleResult = ExtractAppleTag(file, mappedAtom);
                     if (!string.IsNullOrEmpty(appleResult))
                     {
-                        _logger.LogInformation("✓ Found CONTENTGROUP using mapped atom '{MappedAtom}'", mappedAtom);
+                        _logger.LogInformation("Found CONTENTGROUP using mapped atom '{MappedAtom}'", mappedAtom);
                         return appleResult;
                     }
                 }
@@ -914,19 +924,13 @@ public class MusicTagService(
                     atomName = mappedAtom;
                 }
                 
-                // Known integer atoms that store binary data
-                var integerAtoms = new HashSet<string>(StringComparer.OrdinalIgnoreCase) 
-                { 
-                    "plID", "tmpo", "rtng", "stik", "sfID", "cnID", "atID", "geID" 
-                };
-                
                 // Try to get the atom via DataBoxes
                 var dataBoxes = appleTag.DataBoxes(atomName);
                 
                 if (dataBoxes != null && dataBoxes.Any())
                 {
                     var values = new List<string>();
-                    bool isIntegerAtom = integerAtoms.Contains(atomName) || integerAtoms.Contains(cleanTagName);
+                    bool isIntegerAtom = IntegerAtoms.Contains(atomName) || IntegerAtoms.Contains(cleanTagName);
                     
                     foreach (var box in dataBoxes)
                     {
@@ -938,26 +942,27 @@ public class MusicTagService(
                                 try
                                 {
                                     var data = box.Data;
+                                    var bytes = data.Data;
+                                    var count = data.Count;
                                     
-                                    // Parse as 64-bit integer (big-endian)
-                                    if (data.Count == 8)
+                                    if (count == 8)
                                     {
-                                        long value = 0;
-                                        for (int i = 0; i < 8; i++)
-                                        {
-                                            value = (value << 8) | data[i];
-                                        }
+                                        var value = BinaryPrimitives.ReadInt64BigEndian(bytes);
                                         values.Add(value.ToString(CultureInfo.InvariantCulture));
                                     }
-                                    // Parse as 32-bit integer (big-endian)
-                                    else if (data.Count == 4)
+                                    else if (count == 4)
                                     {
-                                        int value = 0;
-                                        for (int i = 0; i < 4; i++)
-                                        {
-                                            value = (value << 8) | data[i];
-                                        }
+                                        var value = BinaryPrimitives.ReadInt32BigEndian(bytes);
                                         values.Add(value.ToString(CultureInfo.InvariantCulture));
+                                    }
+                                    else if (count == 2)
+                                    {
+                                        var value = BinaryPrimitives.ReadInt16BigEndian(bytes);
+                                        values.Add(value.ToString(CultureInfo.InvariantCulture));
+                                    }
+                                    else if (count == 1)
+                                    {
+                                        values.Add(data[0].ToString(CultureInfo.InvariantCulture));
                                     }
                                 }
                                 catch (Exception ex)
