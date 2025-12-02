@@ -813,7 +813,7 @@ public class MusicTagService(
             }
 
             // Try ASF tags (for WMA files)
-            var asfResult = ExtractAsfTag(file, tagName);
+            var asfResult = ExtractAsfTag(file, cleanTagName);
             if (!string.IsNullOrEmpty(asfResult))
             {
                 return asfResult;
@@ -821,7 +821,7 @@ public class MusicTagService(
 
             // Try TXXX frames (User Text Information) for custom tags in MP3/WAV files
             // This is where MP3Tag stores custom tags that don't have standard frame IDs
-            var userTextResult = ExtractId3v2UserTextFrame(file, tagName);
+            var userTextResult = ExtractId3v2UserTextFrame(file, cleanTagName);
             if (!string.IsNullOrEmpty(userTextResult))
             {
                 return userTextResult;
@@ -829,7 +829,7 @@ public class MusicTagService(
 
             // Check if this tag name has a known ID3v2 frame mapping
             // This allows friendly names like "FILETYPE" to map to standard frames like "TFLT"
-            if (TagNameToFrameId.TryGetValue(tagName, out var frameId))
+            if (TagNameToFrameId.TryGetValue(cleanTagName, out var frameId))
             {
                 var mappedResult = ExtractId3v2TextFrame(file, frameId);
                 if (!string.IsNullOrEmpty(mappedResult))
@@ -841,9 +841,9 @@ public class MusicTagService(
             // Try the tag name itself if it looks like an ID3v2 frame ID (4 characters)
             // This allows users to use frame IDs directly (e.g., "TFLT", "TMOO")
             // Ensure frame ID is uppercase as required by ID3v2 specification
-            if (tagName.Length == 4 && tagName.All(char.IsLetterOrDigit))
+            if (cleanTagName.Length == 4 && cleanTagName.All(char.IsLetterOrDigit))
             {
-                var frameIdUpper = tagName.ToUpperInvariant();
+                var frameIdUpper = cleanTagName; // Already uppercased
                 var id3Result = ExtractId3v2TextFrame(file, frameIdUpper);
                 if (!string.IsNullOrEmpty(id3Result))
                 {
@@ -852,7 +852,7 @@ public class MusicTagService(
             }
 
             // Finally try generic extraction via reflection
-            return ExtractGenericTag(file, tagName);
+            return ExtractGenericTag(file, cleanTagName);
         }
         catch (Exception ex)
         {
@@ -973,6 +973,10 @@ public class MusicTagService(
                                     else if (count == 1)
                                     {
                                         values.Add(data[0].ToString(CultureInfo.InvariantCulture));
+                                    }
+                                    else
+                                    {
+                                        _logger.LogDebug("Unexpected data length {Count} for integer atom '{AtomName}'", count, atomName);
                                     }
                                 }
                                 catch (Exception ex)
