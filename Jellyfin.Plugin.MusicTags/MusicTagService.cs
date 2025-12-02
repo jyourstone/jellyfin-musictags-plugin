@@ -186,10 +186,9 @@ public class MusicTagService(
     /// Known integer atoms that store binary data instead of text.
     /// These atoms require special parsing to extract numeric values from binary data.
     /// </summary>
-    private static readonly HashSet<string> IntegerAtoms = new(StringComparer.OrdinalIgnoreCase) 
-    { 
-        "plID", "tmpo", "rtng", "stik", "sfID", "cnID", "atID", "geID" 
-    };
+    private static readonly HashSet<string> IntegerAtoms = new(
+        ["plID", "tmpo", "rtng", "stik", "sfID", "cnID", "atID", "geID"],
+        StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Removes surrounding quotes from a string only if both ends have matching quotes.
@@ -218,6 +217,27 @@ public class MusicTagService(
 
         // No matching quotes, return as-is
         return value;
+    }
+
+    /// <summary>
+    /// Removes all types of quotes from a string, including regular quotes, curly quotes, and guillemets.
+    /// This is used for cleaning tag names where quotes should be completely removed.
+    /// </summary>
+    /// <param name="value">The string to process.</param>
+    /// <returns>The string with all quotes removed and trimmed.</returns>
+    private static string StripAllQuotes(string value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return value;
+        }
+
+        return value
+            .Replace("\"", "").Replace("'", "")           // Regular quotes
+            .Replace(""", "").Replace(""", "")           // Left/right double quotes
+            .Replace("'", "").Replace("'", "")             // Left/right single quotes
+            .Replace("«", "").Replace("»", "")            // Guillemets
+            .Trim();
     }
 
     /// <summary>
@@ -377,7 +397,7 @@ public class MusicTagService(
             
             var tagNames = rawTagNames
                 .Split(',', StringSplitOptions.RemoveEmptyEntries)
-                .Select(name => name.Trim().Replace("\"", "").Replace("'", "").Trim())  // Remove ALL quotes from individual tag names
+                .Select(name => StripAllQuotes(name.Trim()))
                 .Where(name => !string.IsNullOrEmpty(name))
                 .ToList();
 
@@ -480,13 +500,7 @@ public class MusicTagService(
             // Clean the tag name by removing quotes and trimming
             // Handle both regular quotes and any whitespace
             // Remove ALL quote characters aggressively - they might be encoded differently
-            var cleanTagName = tagName;
-            // Remove all types of quotes: regular, curly, smart quotes, etc.
-            cleanTagName = cleanTagName.Replace("\"", "").Replace("'", "")
-                                       .Replace(""", "").Replace(""", "")  // Left/right double quotes
-                                       .Replace("'", "").Replace("'", "")    // Left/right single quotes
-                                       .Replace("«", "").Replace("»", "")    // Guillemets
-                                       .Trim();
+            var cleanTagName = StripAllQuotes(tagName);
             cleanTagName = cleanTagName.ToUpperInvariant();
             
             // Log the actual bytes to see what we're dealing with
@@ -744,7 +758,7 @@ public class MusicTagService(
         try
         {
             // Clean the tag name first (remove quotes)
-            var cleanTagName = tagName.Trim().Replace("\"", "").Replace("'", "").Trim().ToUpperInvariant();
+            var cleanTagName = StripAllQuotes(tagName).ToUpperInvariant();
             
             // First try Vorbis comments (for FLAC, OGG, OPUS files)
             // Custom tags and standard tags both work the same way in Vorbis
@@ -868,11 +882,7 @@ public class MusicTagService(
         try
         {
             // Clean the tag name to remove any quotes
-            var cleanTagName = tagName.Trim()
-                .Replace("\"", "").Replace("'", "")
-                .Replace(""", "").Replace(""", "")
-                .Replace("'", "").Replace("'", "")
-                .Trim();
+            var cleanTagName = StripAllQuotes(tagName);
             
             // Check if the file supports Apple tags (M4A, MP4, AAC, etc.)
             if (file.GetTag(TagLib.TagTypes.Apple) is TagLib.Mpeg4.AppleTag appleTag)
