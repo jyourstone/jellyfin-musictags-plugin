@@ -513,9 +513,9 @@ public class MusicTagService(
                 firstCharBytes,
                 lastCharBytes);
             
-            return cleanTagName switch
+            // First try standard TagLib properties for common tags
+            var result = cleanTagName switch
             {
-                // Standard ID3 tags
                 "ARTIST" => !string.IsNullOrEmpty(file.Tag.FirstPerformer) ? file.Tag.FirstPerformer : null,
                 "ALBUM" => !string.IsNullOrEmpty(file.Tag.Album) ? file.Tag.Album : null,
                 "GENRE" => !string.IsNullOrEmpty(file.Tag.FirstGenre) ? file.Tag.FirstGenre : null,
@@ -525,16 +525,20 @@ public class MusicTagService(
                 "PUBLISHER" => !string.IsNullOrEmpty(file.Tag.Publisher) ? file.Tag.Publisher : null,
                 "COPYRIGHT" => !string.IsNullOrEmpty(file.Tag.Copyright) ? file.Tag.Copyright : null,
                 "COMMENT" => !string.IsNullOrEmpty(file.Tag.Comment) ? file.Tag.Comment : null,
-                
-                // ID3v2 custom frames
-                // Note: CONTENTGROUP is handled via ExtractCustomTag to support both ID3v2 (TIT1) and Apple (©grp) formats
                 "KEY" => ExtractKeyTag(file),
                 "MOOD" => ExtractId3v2TextFrame(file, "TMOO"),
                 "LANGUAGE" => ExtractId3v2TextFrame(file, "TLAN"),
-                
-                // Try to extract from different tag types based on tag name format
-                _ => ExtractCustomTag(file, cleanTagName)
+                _ => null
             };
+
+            // If no result from standard properties, try custom tag extraction
+            // This handles TXXX frames, PRIV frames (WM/), Apple tags, Vorbis comments, ASF, etc.
+            if (result == null)
+            {
+                result = ExtractCustomTag(file, cleanTagName);
+            }
+
+            return result;
         }
         catch (Exception ex)
         {
@@ -826,6 +830,14 @@ public class MusicTagService(
             if (!string.IsNullOrEmpty(userTextResult))
             {
                 return userTextResult;
+            }
+
+            // Try PRIV frames (Private Frame) for tags stored by Windows Media and other applications
+            // These use owner identifiers like "WM/Mood" to store custom metadata
+            var privateFrameResult = ExtractId3v2PrivateFrame(file, cleanTagName);
+            if (!string.IsNullOrEmpty(privateFrameResult))
+            {
+                return privateFrameResult;
             }
 
             // Check if this tag name has a known ID3v2 frame mapping
@@ -1241,7 +1253,225 @@ public class MusicTagService(
         }
     }
 
+    /// <summary>
+    /// Extracts a PRIV (Private Frame) from ID3v2 tags by looking for matching owner identifiers.
+    /// Private frames are used by applications like Windows Media Player to store custom metadata.
+    /// Common owner patterns include "WM/Mood", "WM/InitialKey", etc.
+    ///
+    /// The method searches for PRIV frames where the owner matches:
+    /// 1. Exact match with the tag name (e.g., owner="MOOD" for tag "MOOD")
+    /// 2. WM/ prefix match (e.g., owner="WM/Mood" for tag "MOOD")
+    /// 3. Case-insensitive matching
+    /// </summary>
+    /// <param name="file">The TagLib file.</param>
+    /// <param name="tagName">The tag name to search for (case-insensitive).</param>
+    /// <returns>The decoded text value if found, otherwise null.</returns>
+    private string? ExtractId3v2PrivateFrame(TagLib.File file, string tagName)
+    {
+        try
+        {
+            if (file.GetTag(TagLib.TagTypes.Id3v2) is TagLib.Id3v2.Tag id3v2Tag)
+            {
+                // Get all PRIV frames
+                var frames = id3v2Tag.GetFrames("PRIV");
 
+                foreach (var frame in frames)
+                {
+                    if (frame is TagLib.Id3v2.PrivateFrame privateFrame)
+                    {
+                        var owner = privateFrame.Owner ?? string.Empty;
+
+                        // Check if owner matches the tag name:
+                        // 1. Exact match (owner == tagName)
+                        // 2. WM/ prefix match (owner == "WM/tagName")
+                        // 3. Owner ends with /tagName
+                        var ownerMatchesTag =
+                            string.Equals(owner, tagName, StringComparison.OrdinalIgnoreCase) ||
+                            string.Equals(owner, $"WM/{tagName}", StringComparison.OrdinalIgnoreCase) ||
+                            owner.EndsWith($"/{tagName}", StringComparison.OrdinalIgnoreCase);
+
+                        if (ownerMatchesTag)
+                        {
+                            var data = privateFrame.PrivateData;
+                            if (data != null && data.Count > 0)
+                            {
+                                var decodedValue = DecodePrivateFrameData(data.Data, data.Count, owner);
+                                if (!string.IsNullOrEmpty(decodedValue))
+                                {
+                                    _logger.LogDebug("Found PRIV frame with owner '{Owner}' for tag '{TagName}': '{Value}'",
+                                        owner, tagName, decodedValue);
+                                    return decodedValue;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            return null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error extracting PRIV frame for tag {TagName}", tagName);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Decodes the binary data from a PRIV frame into a string value.
+    /// Handles multiple encoding formats commonly used by tagging applications:
+    /// - UTF-16 LE (Little Endian) with or without BOM - commonly used by Windows Media
+    /// - UTF-16 BE (Big Endian) with BOM
+    /// - UTF-8
+    /// - ASCII/Latin-1
+    /// </summary>
+    /// <param name="bytes">The raw byte data.</param>
+    /// <param name="count">The number of bytes to process.</param>
+    /// <param name="owner">The owner identifier (for logging purposes).</param>
+    /// <returns>The decoded string value, or null if decoding fails.</returns>
+    private string? DecodePrivateFrameData(byte[] bytes, int count, string owner)
+    {
+        if (bytes == null || count == 0)
+        {
+            return null;
+        }
+
+        // Ensure we don't read beyond the actual data
+        var actualCount = Math.Min(count, bytes.Length);
+
+        try
+        {
+            // Check for UTF-16 BOM
+            if (actualCount >= 2)
+            {
+                // UTF-16 LE BOM: FF FE
+                if (bytes[0] == 0xFF && bytes[1] == 0xFE)
+                {
+                    return DecodeUtf16Le(bytes, 2, actualCount - 2);
+                }
+
+                // UTF-16 BE BOM: FE FF
+                if (bytes[0] == 0xFE && bytes[1] == 0xFF)
+                {
+                    return DecodeUtf16Be(bytes, 2, actualCount - 2);
+                }
+            }
+
+            // Check for UTF-16 LE without BOM (common for WM/ tags)
+            // Heuristic: if every other byte is 0x00 (null) and the non-null bytes are printable,
+            // it's likely UTF-16 LE
+            if (actualCount >= 2 && LooksLikeUtf16Le(bytes, actualCount))
+            {
+                return DecodeUtf16Le(bytes, 0, actualCount);
+            }
+
+            // Check for UTF-8 BOM: EF BB BF
+            if (actualCount >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF)
+            {
+                return DecodeAndTrim(System.Text.Encoding.UTF8.GetString(bytes, 3, actualCount - 3));
+            }
+
+            // Try UTF-8 (handles ASCII as well)
+            return DecodeAndTrim(System.Text.Encoding.UTF8.GetString(bytes, 0, actualCount));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Error decoding PRIV frame data for owner '{Owner}'", owner);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Checks if the byte array appears to be UTF-16 LE encoded (without BOM).
+    /// Uses a heuristic: ASCII characters in UTF-16 LE have the pattern [char][0x00].
+    /// </summary>
+    private static bool LooksLikeUtf16Le(byte[] bytes, int count)
+    {
+        if (count < 2)
+        {
+            return false;
+        }
+
+        // Check if the pattern suggests UTF-16 LE: odd-indexed bytes should mostly be 0x00
+        // for typical ASCII/Latin text
+        int nullCount = 0;
+        int checkCount = Math.Min(count, 20); // Check first 20 bytes
+
+        for (int i = 1; i < checkCount; i += 2)
+        {
+            if (bytes[i] == 0x00)
+            {
+                nullCount++;
+            }
+        }
+
+        // If more than half of the odd-indexed bytes are null, it's likely UTF-16 LE
+        return nullCount > checkCount / 4;
+    }
+
+    /// <summary>
+    /// Decodes UTF-16 LE encoded data.
+    /// </summary>
+    private string? DecodeUtf16Le(byte[] bytes, int offset, int count)
+    {
+        if (count <= 0)
+        {
+            return null;
+        }
+
+        // Remove trailing null characters (UTF-16 null terminator is 2 bytes)
+        while (count >= 2 && bytes[offset + count - 1] == 0x00 && bytes[offset + count - 2] == 0x00)
+        {
+            count -= 2;
+        }
+
+        if (count <= 0)
+        {
+            return null;
+        }
+
+        var text = System.Text.Encoding.Unicode.GetString(bytes, offset, count);
+        return string.IsNullOrWhiteSpace(text) ? null : text.Trim();
+    }
+
+    /// <summary>
+    /// Decodes UTF-16 BE encoded data.
+    /// </summary>
+    private static string? DecodeUtf16Be(byte[] bytes, int offset, int count)
+    {
+        if (count <= 0)
+        {
+            return null;
+        }
+
+        // Remove trailing null characters
+        while (count >= 2 && bytes[offset + count - 1] == 0x00 && bytes[offset + count - 2] == 0x00)
+        {
+            count -= 2;
+        }
+
+        if (count <= 0)
+        {
+            return null;
+        }
+
+        var text = System.Text.Encoding.BigEndianUnicode.GetString(bytes, offset, count);
+        return string.IsNullOrWhiteSpace(text) ? null : text.Trim();
+    }
+
+    /// <summary>
+    /// Decodes and trims a string, removing null characters and whitespace.
+    /// </summary>
+    private static string? DecodeAndTrim(string text)
+    {
+        if (string.IsNullOrEmpty(text))
+        {
+            return null;
+        }
+
+        // Remove null characters and trim
+        var trimmed = text.TrimEnd('\0').Trim();
+        return string.IsNullOrWhiteSpace(trimmed) ? null : trimmed;
+    }
 
     /// <summary>
     /// Removes specified tags from all audio items in the library.
