@@ -567,6 +567,18 @@ public class MusicTagService(
                 var value = property.GetValue(file.Tag);
                 if (value != null)
                 {
+                    // Handle array types (e.g. Artists, Performers, Genres return string[])
+                    if (value is string[] stringArray)
+                    {
+                        var joined = string.Join("; ", stringArray.Where(s => !string.IsNullOrEmpty(s)));
+                        if (!string.IsNullOrEmpty(joined))
+                        {
+                            return RemoveSurroundingQuotes(joined);
+                        }
+
+                        return null;
+                    }
+
                     var stringValue = value.ToString();
                     if (!string.IsNullOrEmpty(stringValue))
                     {
