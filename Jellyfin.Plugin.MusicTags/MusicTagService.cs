@@ -570,6 +570,13 @@ public class MusicTagService(
                     // Handle array types (e.g. Artists, Performers, Genres return string[])
                     if (value is string[] stringArray)
                     {
+                        _logger.LogDebug(
+                            "ExtractGenericTag: property '{PropertyName}' returned {ValueType} with {Count} item(s): [{Items}]",
+                            property.Name,
+                            value.GetType().Name,
+                            stringArray.Length,
+                            string.Join(", ", stringArray.Select(s => s ?? "<null>")));
+
                         var joined = string.Join("; ", stringArray.Where(s => !string.IsNullOrEmpty(s)));
                         if (!string.IsNullOrEmpty(joined))
                         {
