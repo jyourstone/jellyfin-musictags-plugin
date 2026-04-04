@@ -70,6 +70,7 @@ public class MusicTagService(
         { "ORIGINALALBUM", "TOAL" },
         { "ORIGINALFILENAME", "TOFN" },
         { "ORIGINALYEAR", "TORY" },
+        { "ORIGYEAR", "TORY" },        // Mp3tag alias for ORIGINALYEAR
         { "ORIGINALDATE", "TDOR" },
         { "ORIGINALLYRICIST", "TOLY" },
         
@@ -100,6 +101,18 @@ public class MusicTagService(
         
         // Playlist delay
         { "PLAYLISTDELAY", "TDLY" },
+    };
+
+    /// <summary>
+    /// Fallback frame IDs for ID3v2 version compatibility.
+    /// Some frames changed between ID3v2.3 and ID3v2.4 (e.g., TORY became TDOR).
+    /// When the primary frame yields no result, the fallback is tried automatically
+    /// so users don't need to know which ID3 version their files use.
+    /// </summary>
+    private static readonly Dictionary<string, string> FrameIdFallbacks = new(StringComparer.OrdinalIgnoreCase)
+    {
+        { "TORY", "TDOR" },  // ID3v2.3 original year -> ID3v2.4 original date
+        { "TDOR", "TORY" },  // ID3v2.4 original date -> ID3v2.3 original year
     };
 
     /// <summary>
@@ -867,6 +880,16 @@ public class MusicTagService(
                 if (!string.IsNullOrEmpty(mappedResult))
                 {
                     return mappedResult;
+                }
+
+                // Try the fallback frame for cross-version compatibility (e.g., TORY <-> TDOR)
+                if (FrameIdFallbacks.TryGetValue(frameId, out var fallbackFrameId))
+                {
+                    var fallbackResult = ExtractId3v2TextFrame(file, fallbackFrameId);
+                    if (!string.IsNullOrEmpty(fallbackResult))
+                    {
+                        return fallbackResult;
+                    }
                 }
             }
 
