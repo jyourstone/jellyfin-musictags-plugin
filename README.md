@@ -153,11 +153,11 @@ Remove unwanted tags from your library:
 - **Tag Names to Remove**: `BPM`
 - This will remove all instances of these tags from your Jellyfin music library
 
-## 🎯 Perfect Companion: SmartPlaylist Plugin
+## 🎯 Perfect Companion: SmartLists Plugin
 
-MusicTags works exceptionally well with the **[SmartPlaylist Plugin](https://github.com/jyourstone/jellyfin-smartplaylist-plugin)**! Once you've extracted audio tags with MusicTags, you can use SmartPlaylist to create dynamic playlists based on those custom tags.
+MusicTags works exceptionally well with the **[SmartLists Plugin](https://github.com/jyourstone/jellyfin-smartlists-plugin)**! Once you've extracted audio tags with MusicTags, you can use SmartList to create dynamic playlists based on those custom tags.
 
-### SmartPlaylist Integration Examples
+### SmartLists Integration Examples
 
 - **High-Energy Workout Mix**: Create a playlist with `BPM` tags between 130-150 (filter by tags and use this regex: `\bBPM:(13[0-9]|14[0-9]|150)\b`)
 - **Chill Vibes**: Filter by `MOOD` or `AB:MOOD` tags like "chill", "relaxing", or "ambient"
