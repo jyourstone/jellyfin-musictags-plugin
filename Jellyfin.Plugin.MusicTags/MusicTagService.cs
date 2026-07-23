@@ -586,13 +586,14 @@ public class MusicTagService(
     /// <returns>All comment values joined with "; ", or null if none found.</returns>
     private string? ExtractAllComments(TagLib.File file)
     {
-        var values = new List<string>();
+        List<string> values = [];
 
         // ID3v2 (MP3): gather every COMM frame, not just the first
         if (file.GetTag(TagLib.TagTypes.Id3v2) is TagLib.Id3v2.Tag id3Tag)
         {
             foreach (var frame in id3Tag.GetFrames<TagLib.Id3v2.CommentsFrame>())
             {
+                _logger.LogDebug("Found ID3v2 COMM frame: desc='{Description}', text='{Text}'", frame.Description, frame.Text);
                 if (!string.IsNullOrWhiteSpace(frame.Text))
                 {
                     values.Add(frame.Text.Trim());
@@ -605,6 +606,7 @@ public class MusicTagService(
         {
             foreach (var value in vorbisTag.GetField("COMMENT"))
             {
+                _logger.LogDebug("Found Vorbis COMMENT field: '{Value}'", value);
                 if (!string.IsNullOrWhiteSpace(value))
                 {
                     values.Add(value.Trim());
