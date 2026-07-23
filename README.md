@@ -51,6 +51,7 @@ The configuration page allows you to:
    - Automatically splits tag values containing these delimiters into multiple tags
    - Perfect for multi-genre tracks, parental controls, and instant mix functionality
    - Leave empty to disable splitting
+   - Tags stored as true multi-value fields (multiple ID3v2 COMM frames or repeated Vorbis comment fields) are also extracted in full — add `;` to the delimiters to split them into separate tags
 
 3. **Tag Names to Remove**: Remove unwanted tags from your Jellyfin library
    - Comma-separated list of tag names to remove (e.g., "BPM,KEY")

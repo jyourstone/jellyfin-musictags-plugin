@@ -529,15 +529,15 @@ public class MusicTagService(
             // First try standard TagLib properties for common tags
             var result = cleanTagName switch
             {
-                "ARTIST" => !string.IsNullOrEmpty(file.Tag.FirstPerformer) ? file.Tag.FirstPerformer : null,
+                "ARTIST" => JoinTagValues(file.Tag.Performers),
                 "ALBUM" => !string.IsNullOrEmpty(file.Tag.Album) ? file.Tag.Album : null,
-                "GENRE" => !string.IsNullOrEmpty(file.Tag.FirstGenre) ? file.Tag.FirstGenre : null,
+                "GENRE" => JoinTagValues(file.Tag.Genres),
                 "YEAR" => file.Tag.Year > 0 ? file.Tag.Year.ToString(CultureInfo.InvariantCulture) : null,
-                "COMPOSER" => !string.IsNullOrEmpty(file.Tag.FirstComposer) ? file.Tag.FirstComposer : null,
+                "COMPOSER" => JoinTagValues(file.Tag.Composers),
                 "BPM" => file.Tag.BeatsPerMinute > 0 ? file.Tag.BeatsPerMinute.ToString() : null,
                 "PUBLISHER" => !string.IsNullOrEmpty(file.Tag.Publisher) ? file.Tag.Publisher : null,
                 "COPYRIGHT" => !string.IsNullOrEmpty(file.Tag.Copyright) ? file.Tag.Copyright : null,
-                "COMMENT" => !string.IsNullOrEmpty(file.Tag.Comment) ? file.Tag.Comment : null,
+                "COMMENT" => ExtractAllComments(file),
                 "KEY" => ExtractKeyTag(file),
                 "MOOD" => ExtractId3v2TextFrame(file, "TMOO"),
                 "LANGUAGE" => ExtractId3v2TextFrame(file, "TLAN"),
@@ -558,6 +558,69 @@ public class MusicTagService(
             _logger.LogWarning(ex, "Error extracting tag value for {TagName}", tagName);
             return null;
         }
+    }
+
+    /// <summary>
+    /// Joins a multi-value tag array into a single string using "; " so that
+    /// SplitTagValue can split it back into separate tags via configured delimiters.
+    /// </summary>
+    /// <param name="values">The tag values.</param>
+    /// <returns>The joined value, or null if the array has no non-empty values.</returns>
+    private static string? JoinTagValues(string[]? values)
+    {
+        if (values == null || values.Length == 0)
+        {
+            return null;
+        }
+
+        var joined = string.Join("; ", values.Where(v => !string.IsNullOrWhiteSpace(v)).Select(v => v.Trim()).Distinct());
+        return string.IsNullOrEmpty(joined) ? null : joined;
+    }
+
+    /// <summary>
+    /// Extracts all comment values from the audio file.
+    /// Multi-value comments are stored as multiple ID3v2 COMM frames or repeated
+    /// Vorbis COMMENT fields; the TagLib convenience property only returns the first one.
+    /// </summary>
+    /// <param name="file">The TagLib file.</param>
+    /// <returns>All comment values joined with "; ", or null if none found.</returns>
+    private string? ExtractAllComments(TagLib.File file)
+    {
+        var values = new List<string>();
+
+        // ID3v2 (MP3): gather every COMM frame, not just the first
+        if (file.GetTag(TagLib.TagTypes.Id3v2) is TagLib.Id3v2.Tag id3Tag)
+        {
+            foreach (var frame in id3Tag.GetFrames<TagLib.Id3v2.CommentsFrame>())
+            {
+                if (!string.IsNullOrWhiteSpace(frame.Text))
+                {
+                    values.Add(frame.Text.Trim());
+                }
+            }
+        }
+
+        // Vorbis comments (FLAC/OGG): COMMENT can appear as repeated fields
+        if (file.GetTag(TagLib.TagTypes.Xiph) is TagLib.Ogg.XiphComment vorbisTag)
+        {
+            foreach (var value in vorbisTag.GetField("COMMENT"))
+            {
+                if (!string.IsNullOrWhiteSpace(value))
+                {
+                    values.Add(value.Trim());
+                }
+            }
+        }
+
+        if (values.Count == 0)
+        {
+            // Other containers (M4A, ASF, APE): fall back to the convenience property
+            return !string.IsNullOrEmpty(file.Tag.Comment) ? file.Tag.Comment : null;
+        }
+
+        var result = string.Join("; ", values.Distinct());
+        _logger.LogDebug("Extracted {Count} comment value(s): '{Result}'", values.Count, result);
+        return result;
     }
 
     /// <summary>
