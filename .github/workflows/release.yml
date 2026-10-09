@@ -6,9 +6,9 @@ on:
       - 'v*'
 
 env:
-  DOTNET_VERSION: 9.0.x
+  DOTNET_VERSION: 10.0.x
   PRERELEASE_STR: true
-  TARGET_ABI: 10.11.0
+  TARGET_ABI: 12.0.0.0
 
 jobs:
   build:
@@ -21,7 +21,7 @@ jobs:
           fetch-depth: 0
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
