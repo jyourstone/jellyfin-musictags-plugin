@@ -7,7 +7,7 @@ This folder contains all the files needed for local development and testing of t
 Make sure you have the following installed on your system:
 
 - [Docker](https://www.docker.com/)
-- [.NET SDK](https://dotnet.microsoft.com/)
+- [.NET 10 SDK](https://dotnet.microsoft.com/)
 
 ## Files in this Folder
 
