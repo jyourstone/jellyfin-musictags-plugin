@@ -18,6 +18,8 @@
 [Dd]ebugPublic/
 [Rr]elease/
 [Rr]eleases/
+# Project release skill is not a build folder
+!.claude/skills/release/
 x64/
 x86/
 [Aa][Rr][Mm]/
