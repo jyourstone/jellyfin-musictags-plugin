@@ -7,8 +7,15 @@ on:
 
 env:
   DOTNET_VERSION: 10.0.x
-  PRERELEASE_STR: true
-  TARGET_ABI: 12.0.0.0
+  PRERELEASE_STR: false
+  # Ship-forward: releases target Jellyfin 12 only. Jellyfin 10.11 servers stay on the last
+  # version published for them (v10.11.3.3) - Jellyfin offers every version whose targetAbi is at
+  # or below the running server, so they keep a working build without being offered newer ones.
+  # A 10.11 hotfix, if ever needed, is cut from the 10.11-release branch, whose copy of this
+  # workflow has this set to '[{"abi":"10.11.0","framework":"net9.0"}]'. That branch sits at
+  # the last commit that still carried the net9.0 target, so its hotfix workflow can build
+  # net9.0 while main (net10.0-only) cannot.
+  TARGETS: '[{"abi":"12.0.0.0","framework":"net10.0"}]'
 
 jobs:
   build:
@@ -16,7 +23,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -32,7 +39,7 @@ jobs:
         id: check_preview
         run: |
           # Check if tag name contains "preview" or "rc" after version
-          TAG_NAME="${{ github.ref_name }}"
+          TAG_NAME="$GITHUB_REF_NAME"
           if echo "$TAG_NAME" | grep -E "preview|rc" > /dev/null; then
             echo "is_preview=true" >> $GITHUB_OUTPUT
             echo "Preview tag detected: $TAG_NAME"
@@ -47,31 +54,68 @@ jobs:
       - name: Build plugin
         run: |
           # Strip preview/rc suffixes for .NET versioning
-          VERSION=$(echo "${{ github.ref_name }}" | sed -E 's/(preview|rc).*$//' | sed 's/v//' | sed 's/-$//')
-          echo "Building version: $VERSION (stripped from tag: ${{ github.ref_name }})"
-          dotnet build Jellyfin.Plugin.MusicTags/Jellyfin.Plugin.MusicTags.csproj \
-            --configuration Release --no-restore -o ./build_output \
-            /p:Version=$VERSION /p:AssemblyVersion=$VERSION
+          VERSION=$(echo "$GITHUB_REF_NAME" | sed -E 's/(preview|rc).*$//' | sed 's/v//' | sed 's/-$//')
+          echo "Building version: $VERSION (stripped from tag: $GITHUB_REF_NAME)"
+          echo "$TARGETS" | jq -c '.[]' | while read -r target; do
+            TARGET_ABI=$(echo "$target" | jq -r '.abi')
+            TARGET_FRAMEWORK=$(echo "$target" | jq -r '.framework')
+            echo "Building Jellyfin ABI ${TARGET_ABI} (${TARGET_FRAMEWORK})"
+            dotnet build Jellyfin.Plugin.MusicTags/Jellyfin.Plugin.MusicTags.csproj \
+              --framework "$TARGET_FRAMEWORK" \
+              --configuration Release --no-restore -o "./build_output/${TARGET_ABI}" \
+              /p:Version=$VERSION /p:AssemblyVersion=$VERSION
+          done
 
       - name: Create Plugin Zip
         run: |
-          mkdir -p staging
-          cp ./build_output/Jellyfin.Plugin.MusicTags.dll staging/
-          cp images/logo.jpg staging/logo.jpg
-          cd staging
-          zip -X ../Jellyfin.Plugin.MusicTags_${{ github.ref_name }}.zip *
-          cd ..
+          echo "$TARGETS" | jq -c '.[]' | while read -r target; do
+            TARGET_ABI=$(echo "$target" | jq -r '.abi')
+            STAGING_DIR="staging/${TARGET_ABI}"
+            mkdir -p "$STAGING_DIR"
+            cp "./build_output/${TARGET_ABI}/Jellyfin.Plugin.MusicTags.dll" "$STAGING_DIR/"
+            cp "./build_output/${TARGET_ABI}/Jellyfin.Plugin.MusicTags.deps.json" "$STAGING_DIR/"
+            cp images/logo.jpg "$STAGING_DIR/logo.jpg"
+            cd "$STAGING_DIR"
+            zip -X "../../Jellyfin.Plugin.MusicTags_${GITHUB_REF_NAME}_${TARGET_ABI}.zip" *
+            cd ../..
+          done
 
-      - name: Create Release (auto notes from PRs)
+      - name: Read tag message
+        id: tag_message
+        run: |
+          # actions/checkout replaces the annotated tag with a lightweight ref
+          # pointing at the commit (actions/checkout#290) — re-fetch to get the
+          # real tag object back before reading its message.
+          git fetch --tags --force
+          BODY=""
+          if [ "$(git cat-file -t "$GITHUB_REF_NAME")" = "tag" ]; then
+            BODY=$(git tag -l --format='%(contents:body)' "$GITHUB_REF_NAME")
+          fi
+          if [ -n "$BODY" ]; then
+            echo "has_message=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_message=false" >> "$GITHUB_OUTPUT"
+          fi
+          {
+            echo 'body<<EOM'
+            echo "$BODY"
+            echo 'EOM'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create Release
         id: create_release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           name: Release ${{ github.ref_name }}
-          files: ./Jellyfin.Plugin.MusicTags_${{ github.ref_name }}.zip
+          # Changelog from the annotated tag message (written by the /release
+          # skill). Falls back to GitHub auto-generated notes (PR titles +
+          # labels) when the tag has no annotated message.
+          body: ${{ steps.tag_message.outputs.body }}
+          files: ./Jellyfin.Plugin.MusicTags_${{ github.ref_name }}_*.zip
           draft: false
           # Use the dynamically determined prerelease status
           prerelease: ${{ steps.check_preview.outputs.is_preview }}
-          generate_release_notes: true
+          generate_release_notes: ${{ steps.tag_message.outputs.has_message != 'true' }}
           token: ${{ secrets.PAT }}
 
       - name: Read Release Body
@@ -81,7 +125,7 @@ jobs:
         run: |
           set -e
           resp=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
-                 "https://api.github.com/repos/${{ github.repository }}/releases/tags/${{ github.ref_name }}")
+                 "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${GITHUB_REF_NAME}")
           body=$(echo "$resp" | jq -r '.body // ""')
           {
             echo 'body<<EOM'
@@ -89,22 +133,18 @@ jobs:
             echo 'EOM'
           } >> "$GITHUB_OUTPUT"
 
-      - name: Update External Manifest
+      - name: Update External Manifest (Stable)
         if: steps.check_preview.outputs.is_preview != 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.PAT }}
+          CHANGELOG_BODY: ${{ steps.read_release.outputs.body }}
         run: |
           # Strip preview/rc suffixes for .NET versioning
-          VERSION=$(echo "${{ github.ref_name }}" | sed -E 's/(preview|rc).*$//' | sed 's/v//' | sed 's/-$//')
+          VERSION=$(echo "$GITHUB_REF_NAME" | sed -E 's/(preview|rc).*$//' | sed 's/v//' | sed 's/-$//')
           ASSEMBLY_VERSION="${VERSION}"
-          ZIP_NAME="Jellyfin.Plugin.MusicTags_${{ github.ref_name }}.zip"
-          CHECKSUM=$(md5sum ${ZIP_NAME} | cut -d' ' -f1 | tr '[:lower:]' '[:upper:]')
-          DOWNLOAD_URL="https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/${ZIP_NAME}"
-          TARGET_ABI="${{ env.TARGET_ABI }}"
           TIMESTAMP=$(date -u +'%Y-%m-%d')
-          CHANGELOG="${{ steps.read_release.outputs.body }}"
           # Sanitize changelog: remove trailing "by @user in <link>" fragments GitHub adds
-          CLEAN_CHANGELOG=$(echo "$CHANGELOG" | sed -E 's/[[:space:]]*by @[[:alnum:]-]+ in https?:\/\/[^[:space:]]+//g')
+          CLEAN_CHANGELOG=$(echo "$CHANGELOG_BODY" | sed -E 's/[[:space:]]*by @[[:alnum:]-]+ in https?:\/\/[^[:space:]]+//g')
           MANIFEST_REPO="jyourstone/jellyfin-plugin-manifest"
           PLUGIN_GUID="25EE643C-8A32-41BE-B165-E9CA0B57E769"
 
@@ -115,15 +155,6 @@ jobs:
           if [ ! -f "$MANIFEST_FILE" ]; then
             echo "[]" > "$MANIFEST_FILE"
           fi
-
-          NEW_PACKAGE=$(jq -n \
-            --arg version "$ASSEMBLY_VERSION" \
-            --arg abi "$TARGET_ABI" \
-            --arg url "$DOWNLOAD_URL" \
-            --arg checksum "$CHECKSUM" \
-            --arg changelog "$CLEAN_CHANGELOG" \
-            --arg timestamp "$TIMESTAMP" \
-            '{version: $version, targetAbi: $abi, sourceUrl: $url, checksum: $checksum, changelog: $changelog, timestamp: $timestamp}')
 
           if ! jq -e --arg guid "$PLUGIN_GUID" 'any(.[]; .guid == $guid)' "$MANIFEST_FILE" > /dev/null; then
             PLUGIN_ENTRY=$(jq -n \
@@ -138,12 +169,92 @@ jobs:
             jq --argjson new_entry "$PLUGIN_ENTRY" '. += [$new_entry]' "$MANIFEST_FILE" > tmp && mv tmp "$MANIFEST_FILE"
           fi
 
-          jq --argjson new_package "$NEW_PACKAGE" --arg guid "$PLUGIN_GUID" \
-            '(.[] | select(.guid == $guid).versions) |= [$new_package] + .' \
-            "$MANIFEST_FILE" > tmp && mv tmp "$MANIFEST_FILE"
+          echo "$TARGETS" | jq -c '.[]' | while read -r target; do
+            TARGET_ABI=$(echo "$target" | jq -r '.abi')
+            ZIP_NAME="Jellyfin.Plugin.MusicTags_${GITHUB_REF_NAME}_${TARGET_ABI}.zip"
+            CHECKSUM=$(md5sum "../${ZIP_NAME}" | cut -d' ' -f1 | tr '[:lower:]' '[:upper:]')
+            DOWNLOAD_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/${ZIP_NAME}"
+            NEW_PACKAGE=$(jq -n \
+              --arg version "$ASSEMBLY_VERSION" \
+              --arg abi "$TARGET_ABI" \
+              --arg url "$DOWNLOAD_URL" \
+              --arg checksum "$CHECKSUM" \
+              --arg changelog "$CLEAN_CHANGELOG" \
+              --arg timestamp "$TIMESTAMP" \
+              '{version: $version, targetAbi: $abi, sourceUrl: $url, checksum: $checksum, changelog: $changelog, timestamp: $timestamp}')
+            jq --argjson new_package "$NEW_PACKAGE" --arg guid "$PLUGIN_GUID" \
+              '(.[] | select(.guid == $guid).versions) |=
+                 ([$new_package] + map(select(.version != $new_package.version or .targetAbi != $new_package.targetAbi)))' \
+              "$MANIFEST_FILE" > tmp_manifest.json && mv tmp_manifest.json "$MANIFEST_FILE"
+          done
 
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
           git add manifest.json
           git commit -m "Update manifest for MusicTags v${VERSION}"
           git push
+
+      - name: Update External Manifest (Unstable)
+        if: steps.check_preview.outputs.is_preview == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.PAT }}
+          CHANGELOG_BODY: ${{ steps.read_release.outputs.body }}
+        run: |
+          # Strip preview/rc suffixes for .NET versioning
+          VERSION=$(echo "$GITHUB_REF_NAME" | sed -E 's/(preview|rc).*$//' | sed 's/v//' | sed 's/-$//')
+          FULL_VERSION=$(echo "$GITHUB_REF_NAME" | sed 's/v//')
+          TIMESTAMP=$(date -u +'%Y-%m-%d')
+          # Sanitize changelog: remove trailing "by @user in <link>" fragments GitHub adds
+          CLEAN_CHANGELOG=$(echo "$CHANGELOG_BODY" | sed -E 's/[[:space:]]*by @[[:alnum:]-]+ in https?:\/\/[^[:space:]]+//g')
+          MANIFEST_REPO="jyourstone/jellyfin-plugin-manifest"
+          PLUGIN_GUID="25EE643C-8A32-41BE-B165-E9CA0B57E769"
+
+          git clone https://x-access-token:${{ secrets.PAT }}@github.com/${MANIFEST_REPO}.git manifest-repo
+          cd manifest-repo
+          
+          # Switch to unstable branch (create if it doesn't exist)
+          git checkout unstable 2>/dev/null || git checkout -b unstable
+          
+          MANIFEST_FILE="manifest.json"
+
+          if [ ! -f "$MANIFEST_FILE" ]; then
+            echo "[]" > "$MANIFEST_FILE"
+          fi
+
+          if ! jq -e --arg guid "$PLUGIN_GUID" 'any(.[]; .guid == $guid)' "$MANIFEST_FILE" > /dev/null; then
+            PLUGIN_ENTRY=$(jq -n \
+              --arg name "MusicTags" \
+              --arg guid "$PLUGIN_GUID" \
+              --arg overview "MusicTags plugin for Jellyfin (Unstable)." \
+              --arg description "Automatically extract metadata from audio files - such as ID3 tags, Vorbis comments, and more - and convert them into standard Jellyfin tags. This is an unstable/preview version." \
+              --arg category "General" \
+              --arg owner "jyourstone" \
+              --arg imageUrl "https://raw.githubusercontent.com/jyourstone/jellyfin-musictags-plugin/master/images/logo.jpg" \
+              '{name: $name, guid: $guid, overview: $overview, description: $description, category: $category, owner: $owner, imageUrl: $imageUrl, versions: []}')
+            jq --argjson new_entry "$PLUGIN_ENTRY" '. += [$new_entry]' "$MANIFEST_FILE" > tmp && mv tmp "$MANIFEST_FILE"
+          fi
+
+          echo "$TARGETS" | jq -c '.[]' | while read -r target; do
+            TARGET_ABI=$(echo "$target" | jq -r '.abi')
+            ZIP_NAME="Jellyfin.Plugin.MusicTags_${GITHUB_REF_NAME}_${TARGET_ABI}.zip"
+            CHECKSUM=$(md5sum "../${ZIP_NAME}" | cut -d' ' -f1 | tr '[:lower:]' '[:upper:]')
+            DOWNLOAD_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/${ZIP_NAME}"
+            NEW_PACKAGE=$(jq -n \
+              --arg version "$VERSION" \
+              --arg abi "$TARGET_ABI" \
+              --arg url "$DOWNLOAD_URL" \
+              --arg checksum "$CHECKSUM" \
+              --arg changelog "$CLEAN_CHANGELOG" \
+              --arg timestamp "$TIMESTAMP" \
+              '{version: $version, targetAbi: $abi, sourceUrl: $url, checksum: $checksum, changelog: $changelog, timestamp: $timestamp}')
+            jq --argjson new_package "$NEW_PACKAGE" --arg guid "$PLUGIN_GUID" \
+              '(.[] | select(.guid == $guid).versions) |=
+                 ([$new_package] + map(select(.version != $new_package.version or .targetAbi != $new_package.targetAbi)))' \
+              "$MANIFEST_FILE" > tmp_manifest.json && mv tmp_manifest.json "$MANIFEST_FILE"
+          done
+
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          git add manifest.json
+          git commit -m "Update unstable manifest for MusicTags v${FULL_VERSION}"
+          git push origin unstable
